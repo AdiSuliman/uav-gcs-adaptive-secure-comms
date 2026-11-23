@@ -79,6 +79,9 @@ for a = 1:nA, [~, ~, cm] = apply_countermeasure(p0, 'none', PPm.actions{a}); PPm
 dep = 'dqn_esc'; if isfield(Q, 'deployed') && ~isempty(Q.deployed), dep = Q.deployed; end
 sel = 1; if all(isfield(Q, {'gammas', 'seed_summary'})), sel = find(Q.gammas == Q.seed_summary.selected_gamma, 1); end
 [kindP, agP, optP] = policy_setup(dep, Q, sel, [], [], [], na);   % the deployed chain
+cfgl = []; if exist('CFG', 'var'), cfgl = CFG; end
+ADP = adopt_options(cfgl);                             % adopted settings (CFG.adopt): the deployed DQN's layers only
+optP = adopt_options('dqn', ADP, optP);
 kindD = 'dqn_esc'; if strcmp(dep, 'dqn'), kindD = 'dqn'; end    % the DQN chain as selected (with or without the escalation)
 gpu = canUseGPU;
 CH = {'dep', 'dqn', 'rule'};                           % the chains, each in its own passes
@@ -212,6 +215,7 @@ rep{end+1} = sprintf('Frame duration %.3f ms: one decision per %d frames at the 
     ceil(LAT.total_dep_p95_ms / LAT.frame_ms));
 rep{end+1} = sprintf('Timed: detector %s, deployed policy %s (result_status.m checks them).', LAT.det_id, LAT.policy_stamp);
 rep{end+1} = LAT.load_text;
+if ~isempty(adopt_options('key', ADP)), rep{end+1} = adopt_options('note', ADP, 'dqn'); end
 out_dir = 'results'; out_name = 'latency';
 if DET_FIRST, out_dir = fullfile('results', 'kpi7'); out_name = 'latency_det_first'; end
 if ~exist(out_dir, 'dir'), mkdir(out_dir); end

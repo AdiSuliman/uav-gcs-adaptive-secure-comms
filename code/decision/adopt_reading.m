@@ -45,11 +45,45 @@ function out = adopt_reading(stage, varargin)
 %   default project_root()), rf_dir (selection.json, val.mat, test.mat; default
 %   results/rule_fix/<tag> of root), bundle_ref (the final phase's bundle folder; default
 %   <the tree's parent>/uav-gcs-v7/profiles).
-%   Order: overlay -> off -> c2e -> gate -> render, each once. A later adoption (dqn_hop) enters the
-%   manifest's list after rule_fix; adopt_options.m refuses it until it is implemented, with its own
-%   stages (a write-once adoption_<k>.json extending the list and its own root).
+%   Order: overlay -> off -> c2e -> gate -> render, each once.
+%   Stacked adoption: rule_fix, then dqn_hop (the deployed DQN's hop layer, dqn_fix.m), in an overlay
+%   of its own, results/dqn_hop/<tag>/adopted/, on the tree as it stands; the same pins, links,
+%   copies and write-once files. O.base: the finished rule-fix overlay it stacks on (its c2e, gate
+%   and render passed; default ../adopt-p3/results/rule_fix/<tag>/adopted of root); O.w19_dir: the
+%   hop reading's selection.json and test.mat (default results/weak19/<tag> of root).
+%   adopt_reading('hop_overlay', tag, tree, O)   as overlay, the manifest listing both adoptions and
+%       the base overlay (the SHA-256 of its adopted policy_evaluation.mat); on/ also leaves out
+%       the outputs of C2g, C2u, EDGE and LAT, and data/unknown_threat_agents.mat (C2u writes it)
+%   adopt_reading('hop_off', tag, tree, O)   in off/, at 8 threads: the code differs from the tree's
+%       only in the adoptions' own files; the deployed row of evaluate_policies.m's first six sets
+%       and of single2 run again with every layer off, isequaln to the registered rows; then the
+%       renderers as in off. Any mismatch stops before an adopted file is written
+%   adopt_reading('hop_c2e', tag, tree, O)   evaluate_policies.m in on/ with both adoptions (the hop
+%       layer on the deployed row only). Guards: every column but the rule rows and the deployed
+%       row isequaln to the registered file; the rule rows isequaln to the base overlay's on every
+%       set; the deployed row differs somewhere (no reference); LBC as registered but its rule
+%       column; KP the base's but the deployed row's entries
+%   adopt_reading('hop_gate', tag, tree, O)   the hop reading confirmed on its fresh test set
+%       (test.mat verdict), frozen on this tree and the rule fix's setting (the tree's frozen copy
+%       equal), the DQN deployed under both
+%   adopt_reading('hop_c2gu', tag, tree, O)   C2g then C2u in on/ (8 threads): the hybrid columns carry
+%       the hop layer; every other column, the retrained agents (through their columns) and every
+%       leave-one-out agent isequaln to the registered files. Started again after a stop, an
+%       experiment whose outputs are whole is kept (run_cache keeps the finished entities)
+%   adopt_reading('hop_edge', tag, tree, O)   edge_map.m in on/ (8 threads): FT, CF, CS, VAR and
+%       link_budget as registered; EM with the hop layer on the deployed policy
+%   adopt_reading('hop_lat', tag, tree, O)   measure_latency.m in on/: the deployed chain with the
+%       hop layer, timed once; the detector and the stamp the registered ones
+%   adopt_reading('hop_render', tag, tree, O)   the renderers in on/, no stale file added
+%   adopt_reading('hop_release', tag, tree, O)   the write attribute back; O.release_base true also
+%       for the files the base overlay made read-only, when it has not released them
+%   Order: hop_overlay -> hop_off -> hop_c2e -> hop_gate -> hop_c2gu -> hop_edge -> hop_lat ->
+%   hop_render, each once (C2u writes the leave-one-out agents the edge map reads).
 %   Helpers: X = adopt_reading('paths', tag, O); G = adopt_reading('guard_c2e', N, E, T, opt)
-%   (opt.lect_strict, default true);
+%   (opt.lect_strict, default true); X = adopt_reading('hop_paths', tag, O); K = adopt_reading('hop_reg');
+%   G = adopt_reading('guard_hop', N, E, D); r = adopt_reading('hybrid_rows', name, res, res0, key);
+%   [ok, why] = adopt_reading('confirmed', T, step) (out: struct ok, why);
+%   S = adopt_reading('hop_selection', Sh_dir, tag, tree, rf);
 %   C = adopt_reading('compare', a, b); adopt_reading('write_once', f, lines);
 %   D = adopt_reading('code_diff', root, tree); CFG = adopt_reading('cfg', M);
 %   h = adopt_reading('sha', f); F = adopt_reading('tree_files', tree)
@@ -61,6 +95,22 @@ switch stage
     case 'gate',       out = stage_gate(varargin{:});
     case 'render',     out = stage_render(varargin{:});
     case 'release',    out = stage_release(varargin{:});
+    case 'hop_overlay', out = hop_overlay(varargin{:});
+    case 'hop_off',    out = hop_off(varargin{:});
+    case 'hop_c2e',    out = hop_c2e(varargin{:});
+    case 'hop_gate',   out = hop_gate(varargin{:});
+    case 'hop_c2gu',   out = hop_c2gu(varargin{:});
+    case 'hop_edge',   out = hop_edge(varargin{:});
+    case 'hop_lat',    out = hop_lat(varargin{:});
+    case 'hop_render', out = hop_render(varargin{:});
+    case 'hop_release', out = hop_release(varargin{:});
+    case 'hop_paths',  out = paths_hop(varargin{:});
+    case 'hop_reg',    out = reg_hop();
+    case 'guard_hop',  out = guard_hop(varargin{:});
+    case 'hybrid_rows', out = hybrid_rows(varargin{:});
+    case 'confirmed',  [ok, why] = confirmed(varargin{:}); out = struct('ok', ok, 'why', why);
+    case 'run_in',     out = run_in(varargin{:});
+    case 'hop_selection', out = check_hop_selection(hop_sources(varargin{1}), varargin{2}, canon(varargin{3}), varargin{4});
     case 'paths',      out = paths(varargin{:});
     case 'guard_c2e',  out = guard_c2e(varargin{:});
     case 'compare',    [ok, why] = compare_file(varargin{:}); out = struct('ok', ok, 'why', why);
@@ -236,30 +286,37 @@ rows(end+1) = row('code', isempty(D.bad), sprintf('differs from the tree only in
 rows(end+1) = row('path', pok, pwhy);
 if all([rows.ok])
     lg = start_log(X, 'off'); %#ok<NASGU>
-    tab = has_table(tree);
-    s0 = snapshot(tree); b0 = dir_state(bref);
-    err = render_in(X.off, tab);
-    rows(end+1) = row('renderers', isempty(err), list_txt('ran: ', err));
-    s1 = snapshot(tree); b1 = dir_state(bref);
-    rows(end+1) = row('tree untouched', isequal(s0, s1), snap_why(s0, s1, 'the tree but .git and logs/'));
-    rows(end+1) = row('bundle reference untouched', isequal(b0, b1), snap_why(b0, b1, bref));
-    for f = K.final
-        [ok, why] = compare_file(fullfile(X.off, f{1}), fullfile(tree, f{1}));
-        rows(end+1) = row(f{1}, ok, why); %#ok<AGROW>
-    end
-    if tab
-        for f = K.table
-            if isfile(fullfile(tree, f{1})), [ok, why] = compare_file(fullfile(X.off, f{1}), fullfile(tree, f{1}));
-            else, ok = isfile(fullfile(X.off, f{1})); why = 'not in the tree''s final phase: produced here, nothing to compare'; end
-            rows(end+1) = row(f{1}, ok, why); %#ok<AGROW>
-        end
-    end
-    rx = rx_dir(X.off);
-    rows = [rows, compare_bundle(fullfile(X.off, 'profiles', rx), fullfile(bref, rx))];
-    rows(end+1) = stale_row(fullfile(X.off, 'results', 'report_numbers.json'), fullfile(tree, 'results', 'report_numbers.json'));
+    rows = [rows, off_render_rows(X, tree, bref)];
 end
 V = verdict(X, 'off', rows, struct('bundle_ref', bref, 'code_sha256', M.checkout_code_sha256));
 if ~V.pass, error('adopt_reading:off', 'adopt_reading: ADOPT0 does not reproduce the final phase (see %s); nothing further runs', X.t.off); end
+end
+
+function rows = off_render_rows(X, tree, bref)
+% The renderers in the off root on the registered files: every output equal to the tree's final
+% phase, the bundle to bref's, the stale files the tree's; the tree and bref untouched.
+K = reg(); rows = struct('file', {}, 'ok', {}, 'why', {});
+tab = has_table(tree);
+s0 = snapshot(tree); b0 = dir_state(bref);
+err = render_in(X.off, tab);
+rows(end+1) = row('renderers', isempty(err), list_txt('ran: ', err));
+s1 = snapshot(tree); b1 = dir_state(bref);
+rows(end+1) = row('tree untouched', isequal(s0, s1), snap_why(s0, s1, 'the tree but .git and logs/'));
+rows(end+1) = row('bundle reference untouched', isequal(b0, b1), snap_why(b0, b1, bref));
+for f = K.final
+    [ok, why] = compare_file(fullfile(X.off, f{1}), fullfile(tree, f{1}));
+    rows(end+1) = row(f{1}, ok, why); %#ok<AGROW>
+end
+if tab
+    for f = K.table
+        if isfile(fullfile(tree, f{1})), [ok, why] = compare_file(fullfile(X.off, f{1}), fullfile(tree, f{1}));
+        else, ok = isfile(fullfile(X.off, f{1})); why = 'not in the tree''s final phase: produced here, nothing to compare'; end
+        rows(end+1) = row(f{1}, ok, why); %#ok<AGROW>
+    end
+end
+rx = rx_dir(X.off);
+rows = [rows, compare_bundle(fullfile(X.off, 'profiles', rx), fullfile(bref, rx))];
+rows(end+1) = stale_row(fullfile(X.off, 'results', 'report_numbers.json'), fullfile(tree, 'results', 'report_numbers.json'));
 end
 
 %% ===================== Stage: c2e =====================
@@ -579,6 +636,708 @@ V = verdict(X, 'release', rows, struct('note', {{'The overlay is closed: every s
 if ~V.pass, error('adopt_reading:release', 'adopt_reading: the release failed (see %s)', X.t.release); end
 end
 
+%% ===================== Stacked adoption: rule_fix, then dqn_hop =====================
+function K = reg_hop()
+K = reg();
+K.stages = {'overlay', 'off', 'c2e', 'gate', 'c2gu', 'edge', 'lat', 'render'};
+K.c2gu_res = {'results/combo_generalization.txt', 'results/combo_generalization.mat', ...
+    'results/unknown_threat_policy.txt', 'results/unknown_threat_policy.mat'};
+K.c2gu_data = {'data/unknown_threat_agents.mat'};
+K.c2gu_out = [K.c2gu_res, K.c2gu_data];
+K.edge_out = {'results/edge_map.txt', 'results/edge_map.mat', 'results/edge_summary.txt', 'results/edge_bands.png', ...
+    'results/edge_heatmap_det.png', 'results/edge_heatmap_surv.png', 'results/edge_heatmap_rec.png', ...
+    'results/edge_heatmap_prot.png', 'results/edge_heatmap_system.png', 'results/edge_heatmap_commit.png', ...
+    'results/link_budget.txt', 'results/link_budget.mat'};
+K.lat_out = {'results/latency.txt', 'results/latency.mat'};
+K.may_differ = [K.may_differ, {'decision/dqn_fix.m', 'decision/lb_complete.m', 'decision/policy_monitor.m', ...
+    'decision/build_clean_test_pools.m', 'decision/build_policy_pools.m', 'decision/clean_set_layout.m', ...
+    'decision/fresh_set_layout.m', 'decision/fresh_shadow_seed.m', 'decision/fresh_splice.m', 'decision/pool_seed_owner.m', ...
+    'decision/weak19_reading.m', 'decision/experiment_combo_generalization.m', 'decision/experiment_unknown_threat.m', ...
+    'evaluation/edge_map.m', 'evaluation/measure_latency.m'}];
+K.code_fns = [K.code_fns, {'dqn_fix', 'experiment_combo_generalization', 'experiment_unknown_threat', 'edge_map', 'measure_latency'}];
+K.replay = {'single', 'follower', 'combined', 'unknown', 'clean', 'comb'};   % evaluate_policies.m's first sets
+K.edge_same = {'FT', 'CF', 'CS', 'VAR'};              % the flights and the runs: no policy in them
+K.stale_add = {};                                     % every reader of the deployed rows is run again
+end
+
+function X = paths_hop(tag, O)
+% The stacked overlay results/dqn_hop/<tag>/adopted/ of this checkout. O.w19_dir: the hop
+% reading's selection.json and test.mat (default results/weak19/<tag>); O.base: the finished
+% rule-fix overlay it stacks on (default ../adopt-p3/results/rule_fix/<tag>/adopted).
+if nargin < 2 || isempty(O), O = struct(); end
+X = paths(tag, O);
+X.dir = fullfile(X.root, 'results', 'dqn_hop', tag, 'adopted');
+X.w19 = opt_field(O, 'w19_dir', fullfile(X.root, 'results', 'weak19', tag));
+X.base = opt_field(O, 'base', fullfile(fileparts(X.root), 'adopt-p3', 'results', 'rule_fix', tag, 'adopted'));
+X.man = fullfile(X.dir, 'adoption.json'); X.sha = fullfile(X.dir, 'tree_sha256.txt');
+X.off = fullfile(X.dir, 'off'); X.on = fullfile(X.dir, 'on'); X.logs = fullfile(X.dir, 'logs');
+X.ovt = fullfile(X.dir, 'overlay.txt');
+X.v = struct(); X.t = struct();
+for s = [reg_hop().stages(2:end), {'release'}]
+    X.v.(s{1}) = fullfile(X.dir, [s{1} '.json']); X.t.(s{1}) = fullfile(X.dir, [s{1} '.txt']);
+end
+end
+
+function Sh = hop_sources(d)
+% The hop reading: selection.json (hashed without carriage returns) and test.mat.
+Sh = struct('dir', d, 'sel', fullfile(d, 'selection.json'), 'test', fullfile(d, 'test.mat'));
+for f = {Sh.sel, Sh.test}
+    assert(isfile(f{1}), 'adopt_reading:sources', 'adopt_reading: %s is missing', f{1});
+end
+Sh.h = struct('selection', text_sha(Sh.sel), 'test', sha_file(Sh.test));
+end
+
+function S = check_hop_selection(Sh, tag, tree, rf)
+% The hop reading's frozen selection: this tag and tree, dqn_hop alone adopted (canonical), on the
+% rule fix's setting rf, the DQN deployed.
+S = jsondecode(fileread(Sh.sel));
+assert(isfield(S, 'tag') && strcmp(S.tag, tag), 'adopt_reading:selection', 'adopt_reading: %s is not the selection of %s', Sh.sel, tag);
+assert(isfield(S, 'fingerprint') && isfield(S.fingerprint, 'tree') && strcmpi(canon(S.fingerprint.tree), tree), ...
+    'adopt_reading:selection', 'adopt_reading: %s was frozen on another tree (%s)', Sh.sel, field_txt(S.fingerprint, 'tree'));
+assert(isfield(S, 'adopted') && isstruct(S.adopted) && isequal(fieldnames(S.adopted), {'dqn_hop'}), 'adopt_reading:selection', ...
+    'adopt_reading: %s adopts other than dqn_hop alone', Sh.sel);
+F = dqn_fix('parse', 'dqn_hop', S.adopted.dqn_hop);
+assert(F.on && strcmp(F.name, S.adopted.dqn_hop), 'adopt_reading:selection', 'adopt_reading: %s holds no canonical setting', Sh.sel);
+assert(isfield(S, 'd124') && isfield(S.d124, 'adopted') && strcmp(S.d124.adopted, rf), 'adopt_reading:selection', ...
+    'adopt_reading: %s was chosen on another rule-fix setting than %s', Sh.sel, rf);
+assert(isfield(S, 'deployed') && startsWith(S.deployed, 'dqn'), 'adopt_reading:selection', ...
+    'adopt_reading: %s was read with another deployed policy than the DQN', Sh.sel);
+end
+
+function [M1, B] = base_overlay(d, tag, tree)
+% The finished rule-fix overlay the stack builds on: its manifest, render passed, not released,
+% and the SHA-256 of its adopted policy_evaluation.mat as its c2e recorded it, unchanged.
+assert(isfile(fullfile(d, 'adoption.json')), 'adopt_reading:base', 'adopt_reading: no rule-fix overlay at %s', d);
+M1 = jsondecode(fileread(fullfile(d, 'adoption.json')));
+assert(strcmp(M1.tag, tag) && strcmpi(canon(M1.tree), tree), 'adopt_reading:base', 'adopt_reading: the overlay %s is not of %s', d, tree);
+names = order_of(M1);
+assert(isequal(reshape(names, 1, []), {'rule_fix'}), 'adopt_reading:base', 'adopt_reading: the overlay %s adopts %s, not rule_fix alone', d, strjoin(names, ', '));
+for s = {'c2e', 'gate', 'render'}
+    V = read_verdict(fullfile(d, [s{1} '.json']));
+    assert(~isempty(V) && isequal(V.pass, true), 'adopt_reading:base', 'adopt_reading: the stage %s of %s has not passed', s{1}, d);
+end
+Vc = read_verdict(fullfile(d, 'c2e.json'));
+H = Vc.outputs; if iscell(H), H = [H{:}]; end
+k = find(strcmp({H.file}, 'results/policy_evaluation.mat'), 1);
+assert(~isempty(k), 'adopt_reading:base', 'adopt_reading: %s records no policy_evaluation.mat', fullfile(d, 'c2e.json'));
+pe = fullfile(d, 'on', 'results', 'policy_evaluation.mat');
+assert(isfile(pe) && strcmp(sha_file(pe), H(k).sha256), 'adopt_reading:base', 'adopt_reading: %s changed since its c2e', pe);
+B = struct('dir', d, 'manifest_sha256', text_sha(fullfile(d, 'adoption.json')), 'pe', pe, 'pe_sha256', H(k).sha256, ...
+    'released', isfile(fullfile(d, 'release.json')));
+end
+
+function M = hop_overlay(tag, tree, O)
+if nargin < 3, O = struct(); end
+tree = canon(tree); X = paths_hop(tag, O); K = reg_hop();
+assert(isfolder(tree) && isfile(fullfile(tree, 'results', 'policy_evaluation.mat')) && isfile(fullfile(tree, 'data', 'trained_dqn.mat')), ...
+    'adopt_reading:tree', 'adopt_reading: %s is not a finished tree (results/policy_evaluation.mat, data/trained_dqn.mat)', tree);
+assert(~under(X.dir, tree) && ~under(tree, X.dir) && ~strcmpi(X.root, tree), 'adopt_reading:inside', ...
+    'adopt_reading: the overlay %s would lie inside the tree %s', X.dir, tree);
+assert(~isfolder(X.dir), 'adopt_reading:exists', 'adopt_reading: the overlay %s exists; it is built once', X.dir);
+dirty = code_dirty(X.root);
+assert(isempty(dirty), 'adopt_reading:dirty', 'adopt_reading: the checkout %s has uncommitted code: %s', X.root, strjoin(dirty, ', '));
+[M1, B] = base_overlay(X.base, tag, tree);
+if iscell(M1.adoptions), A1 = M1.adoptions{1}; else, A1 = M1.adoptions(1); end
+Sx = sources(A1.source);
+assert(strcmp(Sx.h.selection, A1.selection_sha256) && strcmp(Sx.h.val, A1.val_sha256) && strcmp(Sx.h.test, A1.test_sha256), ...
+    'adopt_reading:sources', 'adopt_reading: the rule fix''s reading in %s differs from its manifest', Sx.dir);
+Sh = hop_sources(X.w19);
+S = check_hop_selection(Sh, tag, tree, A1.setting);
+F = tree_files(tree);
+H = hash_lines(tree, F);
+mkdir(X.dir);
+write_once(X.sha, H);
+dl = F(startsWith(F, 'data/'));
+ro0 = dl(cellfun(@(f) ~java.io.File(fullfile(tree, f)).canWrite(), dl));
+write_once(X.ovt, {sprintf(['The data files of off/ and on/ are hard links to %s/data, made read-only (on/ leaves out %s, ' ...
+    'which its c2gu stage writes). The attribute belongs to the file: those %d tree files are read-only too (contents and ' ...
+    'dates unchanged; %d were read-only before). adopt_reading(''hop_release'', ''%s'', tree) gives the attribute back ' ...
+    'and closes the overlay.'], tree, strjoin(K.c2gu_data, ', '), numel(dl), numel(ro0), tag)});
+left = struct('off', {K.render_out}, 'on', {[K.render_out, K.c2e_out, K.c2gu_res, K.edge_out, K.lat_out]});
+dleft = struct('off', {{}}, 'on', {K.c2gu_data});
+for r = {'off', 'on'}
+    root = X.(r{1});
+    for i = 1:numel(F)
+        src = fullfile(tree, F{i}); dst = fullfile(root, F{i});
+        if startsWith(F{i}, 'data/')
+            if ~ismember(F{i}, dleft.(r{1})), link_ro(src, dst); end
+        elseif ~ismember(F{i}, left.(r{1})), copy_keep(src, dst); end
+    end
+end
+A1 = struct('name', 'rule_fix', 'setting', A1.setting, 'selection_sha256', A1.selection_sha256, 'val_sha256', A1.val_sha256, ...
+    'test_sha256', A1.test_sha256, 'source', A1.source);
+A2 = struct('name', 'dqn_hop', 'setting', S.adopted.dqn_hop, 'selection_sha256', Sh.h.selection, 'val_sha256', '', ...
+    'test_sha256', Sh.h.test, 'source', Sh.dir);
+M = struct('tag', tag, 'tree', tree, 'tree_head', tree_head(tree), 'checkout', X.root, 'checkout_head', tree_head(X.root), ...
+    'checkout_code_sha256', code_sha(X.root), 'version', 2, 'adoptions', {{A1, A2}}, 'base', B, 'order', {K.stages}, ...
+    'roots', struct('off', 'off', 'on', 'on'), 'left_out', left, 'data_left_out', dleft, 'data_links', {dl}, ...
+    'readonly_before', {ro0}, 'tree_sha256_file', 'tree_sha256.txt', 'tree_sha256_list', sha_file(X.sha), 'n_files', numel(F), ...
+    'created', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+write_once(X.man, {jsonencode(M, 'PrettyPrint', true)});
+M = jsondecode(fileread(X.man));
+end
+
+function [M, X, Sh] = open_hop(tag, tree, O, loose)
+% The stacked overlay with its manifest; both readings, the base overlay's adopted file, the
+% tree's HEAD and the checkout's HEAD and code as recorded; refused once released. loose (the
+% release): the manifest and the tree only.
+if nargin < 4, loose = false; end
+X = paths_hop(tag, O);
+assert(isfile(X.man), 'adopt_reading:no_overlay', 'adopt_reading: no overlay at %s (run the hop_overlay stage first)', X.dir);
+assert(~isfile(X.v.release), 'adopt_reading:released', 'adopt_reading: the overlay %s was released; no stage runs on it', X.dir);
+M = jsondecode(fileread(X.man));
+assert(strcmp(M.tag, tag) && strcmpi(M.tree, tree), 'adopt_reading:tree', 'adopt_reading: the overlay %s belongs to %s', X.dir, M.tree);
+assert(isequal(reshape(order_of(M), 1, []), {'rule_fix', 'dqn_hop'}), 'adopt_reading:order', 'adopt_reading: the stack is rule_fix, then dqn_hop');
+Sh = [];
+if loose, return; end
+A = M.adoptions; if ~iscell(A), A = num2cell(A); end
+Sx = sources(A{1}.source);
+assert(strcmp(Sx.h.selection, A{1}.selection_sha256) && strcmp(Sx.h.val, A{1}.val_sha256) && strcmp(Sx.h.test, A{1}.test_sha256), ...
+    'adopt_reading:sources', 'adopt_reading: the rule fix''s reading in %s differs from the manifest', Sx.dir);
+Sh = hop_sources(A{2}.source);
+assert(strcmp(Sh.h.selection, A{2}.selection_sha256) && strcmp(Sh.h.test, A{2}.test_sha256), 'adopt_reading:sources', ...
+    'adopt_reading: the hop reading in %s differs from the manifest', Sh.dir);
+assert(isfile(M.base.pe) && strcmp(sha_file(M.base.pe), M.base.pe_sha256), 'adopt_reading:base', ...
+    'adopt_reading: %s changed since the overlay', M.base.pe);
+assert(strcmp(tree_head(tree), M.tree_head), 'adopt_reading:head', 'adopt_reading: the HEAD of %s moved since the overlay', tree);
+assert(strcmp(tree_head(X.root), M.checkout_head) && strcmp(code_sha(X.root), M.checkout_code_sha256), 'adopt_reading:code', ...
+    'adopt_reading: the HEAD or the code of the checkout %s moved since the overlay', X.root);
+end
+
+function need(X, stage, what)
+% The earlier stage passed.
+V = read_verdict(X.v.(stage));
+assert(~isempty(V) && isequal(V.pass, true), 'adopt_reading:order', 'adopt_reading: %s is refused: %s has not passed (%s)', ...
+    what, stage, X.v.(stage));
+end
+
+function check_threads(K, what)
+nt = maxNumCompThreads;
+assert(nt == K.threads, 'adopt_reading:threads', ['adopt_reading: %s runs at %d threads, as the chain ran, and the ' ...
+    'reproduction depends on it (maxNumCompThreads is %d; set maxNumCompThreads(%d))'], what, K.threads, nt, K.threads);
+end
+
+function check_tree(X, tree)
+assert(isequal(hash_lines(tree, tree_files(tree)), read_lines(X.sha)), 'adopt_reading:tree_changed', ...
+    'adopt_reading: the tree differs from %s', X.sha);
+end
+
+function check_outputs(X, stages)
+% The outputs the earlier stages recorded still hold their SHA-256.
+for s = stages
+    [ok, why] = rec_ok(X.on, read_verdict(X.v.(s{1})), X.v.(s{1}));
+    assert(ok, 'adopt_reading:outputs', 'adopt_reading: %s', why);
+end
+end
+
+function [ok, why] = rec_ok(on, V, vf)
+% The outputs a stage's verdict vf recorded, in root on, with the SHA-256 it recorded.
+ok = false; why = sprintf('%s records no outputs', vf);
+if ~isstruct(V) || ~isfield(V, 'outputs') || isempty(V.outputs), return; end
+H = V.outputs; if iscell(H), H = [H{:}]; end
+bad = {};
+for k = 1:numel(H)
+    p = fullfile(on, H(k).file);
+    if ~isfile(p) || ~strcmp(sha_file(p), H(k).sha256), bad{end+1} = H(k).file; end %#ok<AGROW>
+end
+ok = isempty(bad);
+why = sprintf('%d outputs recorded in %s%s', numel(H), vf, ternary(ok, ', unchanged', list_txt('; changed since: ', bad)));
+end
+
+%% ----- hop: off -----
+function V = hop_off(tag, tree, O)
+% The renderers on the registered files as ADOPT0, and the deployed DQN's registered rows replayed
+% with this checkout's code, every layer off, before any adopted file is written.
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
+assert(~isfile(X.v.off), 'adopt_reading:exists', 'adopt_reading: %s exists; the off stage runs once', X.v.off);
+assert(~any(cellfun(@(f) isfile(fullfile(X.off, f)), K.render_out)) && ~isfolder(fullfile(X.off, 'profiles')), ...
+    'adopt_reading:exists', 'adopt_reading: %s already holds rendered outputs', X.off);
+check_threads(K, 'the off stage');
+bref = opt_field(O, 'bundle_ref', fullfile(fileparts(tree), 'uav-gcs-v7', 'profiles'));
+rows = struct('file', {}, 'ok', {}, 'why', {});
+D = code_diff(X.root, tree, K.may_differ);
+rows(end+1) = row('code', isempty(D.bad), sprintf('differs from the tree only in the adoptions'' own files (%s)%s', ...
+    strjoin(D.differ, ', '), list_txt(' NOT the tree''s: ', D.bad)));
+[pok, pwhy] = path_ok(X, tree, K.code_fns);
+rows(end+1) = row('path', pok, pwhy);
+if all([rows.ok])
+    lg = start_log(X, 'off'); %#ok<NASGU>
+    rows = [rows, replay_rows(X.off, K)];
+    if all([rows.ok]), rows = [rows, off_render_rows(X, tree, bref)]; end
+end
+V = verdict(X, 'off', rows, struct('bundle_ref', bref, 'code_sha256', M.checkout_code_sha256, 'threads', maxNumCompThreads));
+if ~V.pass, error('adopt_reading:off', 'adopt_reading: off does not reproduce the registered files (see %s); nothing further runs', X.t.off); end
+end
+
+function rows = replay_rows(root, K)
+% In root: the deployed policy's rows of evaluate_policies.m's first six sets and of the second
+% test split's single set, each run again off at its frame draws, isequaln to the registered rows.
+rows = struct('file', {}, 'ok', {}, 'why', {});
+c0 = cd(root); back = onCleanup(@() cd(c0)); %#ok<NASGU>
+t0 = tic;
+L = load('data/policy_pools.mat', 'PP'); PP = L.PP; clear L
+Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary', 'confirm', 'alarm_mode', 'drop_db', ...
+    'deployed', 'rule_sel', 'det_id', 'maha_thr', 'dec');
+check_det_id(PP, Q, 'adopt_reading');
+PP = decision_settings(PP, Q);
+K2 = link_env('tables', PP);
+E = load('results/policy_evaluation.mat', 'RES', 'POL', 'set_names', 'iDQN');
+R2 = load('results/policy_evaluation.mat'); RS2 = field_or(R2, 'RS2', []); clear R2
+sel = find(Q.gammas == Q.seed_summary.selected_gamma, 1);
+dep = E.POL{E.iDQN};
+[kind, ag, opt] = policy_setup(dep, Q, sel, [], [], [], K2.na);
+sets = c2e_sets(PP, K2, Q.H.T);
+lay = isequal(reshape(E.set_names(1:numel(sets)), 1, []), K.replay);
+rows(end+1) = row('replayed sets', lay, sprintf('registered %s; replayed %s; the deployed row %s', ...
+    strjoin(E.set_names(1:min(end, numel(sets))), ', '), strjoin(K.replay, ', '), dep));
+if ~lay, return; end
+for si = 1:numel(sets)
+    R0 = policy_run_set(kind, PP, K2, sets(si).spec, sets(si).split, ag, opt, 20000 + 1000 * si);
+    Rg = E.RES{si, E.iDQN};
+    rows(end+1) = row(['replay ' sets(si).name], isequaln(R0, Rg), sprintf('%d episodes, %s (%.1f min)', numel(R0.ret), ...
+        ternary(isequaln(R0, Rg), 'isequaln to the registered row', ['differs: ' strjoin(diff_fields(R0, Rg), ', ')]), toc(t0) / 60)); %#ok<AGROW>
+end
+if ~isempty(RS2)
+    sg = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
+    spec2 = policy_episodes(sg, numel(PP.ebno), K2.geo(sg, 5), 2, false, false, 64, Q.H.T, RandStream('mt19937ar', 'Seed', 2075));
+    R0 = policy_run_set(kind, PP, K2, spec2, 5, ag, opt, 50000);
+    rows(end+1) = row('replay single2', isequaln(R0, RS2), sprintf('%d episodes, %s', numel(R0.ret), ternary(isequaln(R0, RS2), ...
+        'isequaln to the registered RS2', ['differs: ' strjoin(diff_fields(R0, RS2), ', ')])));
+end
+end
+
+function sets = c2e_sets(PP, K, T)
+% evaluate_policies.m's first six sets, drawn from its stream (2027) in its order.
+nS = numel(PP.ebno); NE = 64; REPS = 2; TEST = 3;
+sg = find(ismember(PP.scen, PP.singles) & ~strcmp(PP.scen, 'none'));
+cb = find(ismember(PP.scen, PP.combos));
+G = @(cells) K.geo(cells, TEST);
+rs = RandStream('mt19937ar', 'Seed', 2027);
+foll = sg(K.followable(sg));
+sp = {policy_episodes(sg, nS, G(sg), REPS, false, false, NE, T, rs), ...
+    policy_episodes(foll, nS, G(foll), REPS, true, false, NE, T, rs), ...
+    policy_episodes(cb, nS, G(cb), REPS, false, false, NE, T, rs), ...
+    policy_episodes(sg, nS, G(sg), 1, false, true, NE, T, rs), ...
+    policy_episodes(K.clean, nS, G(K.clean), 1, false, false, NE, T, rs)};
+jam = foll(ismember(PP.scen(foll), {'jamming', 'reactive_jamming'}));
+cm = policy_episodes(jam, nS, G(jam), 1, true, false, NE, T, rs, [0 0]);
+for b = 1:numel(cm), cm{b}.comb = true(1, NE); end
+sp{end+1} = cm;
+sets = struct('name', reg_hop().replay, 'spec', sp, 'split', TEST);
+end
+
+function f = diff_fields(a, b)
+% The fields of two structs that differ, or the field lists when they do not match.
+if ~(isstruct(a) && isstruct(b)), f = {'not two structs'}; return; end
+fa = fieldnames(a); fb = fieldnames(b);
+f = setxor(fa, fb)';
+for k = reshape(intersect(fa, fb), 1, [])
+    if ~isequaln(a.(k{1}), b.(k{1})), f{end+1} = k{1}; end %#ok<AGROW>
+end
+end
+
+%% ----- hop: c2e -----
+function V = hop_c2e(tag, tree, O)
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
+need(X, 'off', 'the c2e stage');
+assert(~isfile(X.v.c2e) && ~any(cellfun(@(f) isfile(fullfile(X.on, f)), K.c2e_out)), 'adopt_reading:exists', ...
+    'adopt_reading: %s or the outputs of evaluate_policies.m in %s exist; the c2e stage runs once', X.v.c2e, X.on);
+check_threads(K, 'the c2e stage');
+CFG = cfg_of(M); A = adopt_options(CFG);
+check_tree(X, tree);
+[pok, pwhy] = path_ok(X, tree, K.code_fns);
+assert(pok, 'adopt_reading:path', 'adopt_reading: the c2e stage is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
+lg = start_log(X, 'c2e'); %#ok<NASGU>
+H0 = read_lines(X.sha);
+rows = struct('file', {}, 'ok', {}, 'why', {});
+t0 = tic; err = '';
+c0 = cd(X.on);
+try
+    run_c2e(CFG);
+catch e
+    err = e.message;
+end
+cd(c0);
+rows(end+1) = row('evaluate_policies', isempty(err), sprintf('%s; %.1f min, %d threads', ternary(isempty(err), 'ran', err), ...
+    toc(t0) / 60, maxNumCompThreads));
+rows(end+1) = row('tree SHA-256', isequal(hash_lines(tree, tree_files(tree)), H0), sprintf('%d files of results and inputs, before and after', numel(H0)));
+if isempty(err)
+    N = load(fullfile(X.on, 'results', 'policy_evaluation.mat'));
+    E = load(fullfile(X.off, 'results', 'policy_evaluation.mat'));
+    D = load(M.base.pe);
+    G = guard_hop(N, E, D);
+    rows = [rows, G.rows];
+end
+rows(end+1) = row('base overlay', strcmp(sha_file(M.base.pe), M.base.pe_sha256), sprintf('%s as its c2e recorded it', M.base.pe));
+V = verdict(X, 'c2e', rows, struct('setting', struct('rule_fix', A.rule_fix, 'dqn_hop', A.dqn_hop), 'threads', maxNumCompThreads, ...
+    'outputs', {out_hashes(X.on, K.c2e_out)}, 'code_sha256', M.checkout_code_sha256));
+if ~V.pass, error('adopt_reading:c2e', 'adopt_reading: the c2e stage failed its guards (see %s)', X.t.c2e); end
+end
+
+function G = guard_hop(N, E, D)
+% The stacked file N against the registered file E and the rule fix's adopted file D: every column
+% but the rule rows and the deployed row isequaln to E; the rule rows isequaln to D on every set;
+% the deployed row read once with the hop layer (no reference: it changes somewhere); LBC as
+% registered but its rule column; KP isequaln to D's but the deployed row's entries.
+K = reg(); r = struct('file', {}, 'ok', {}, 'why', {});
+vs = isequal(sort(fieldnames(N)), sort(fieldnames(E)));
+r(end+1) = row('variables', vs, sprintf('registered %s; adopted %s', strjoin(sort(fieldnames(E))', ', '), strjoin(sort(fieldnames(N))', ', ')));
+for f = {'POL', 'LBL', 'set_names', 'iDQN', 'iThreat', 'fixed_best', 'tab', 'top_cfg'}
+    if ~isfield(E, f{1}), continue; end
+    e = isfield(N, f{1}) && isequaln(N.(f{1}), E.(f{1})) && isfield(D, f{1}) && isequaln(D.(f{1}), E.(f{1}));
+    r(end+1) = row(f{1}, e, ternary(e, 'as registered, here and in the base', 'differs from the registered file')); %#ok<AGROW>
+end
+POL = E.POL; isr = cellfun(@(p) adopt_options('rule_row', p), POL);
+dc = E.iDQN; isd = false(size(POL)); isd(dc) = true;
+sz = isfield(N, 'RES') && isequal(size(N.RES), size(E.RES)) && isequal(size(D.RES), size(E.RES));
+r(end+1) = row('RES', sz, sprintf('%d sets x %d policies: %d rule rows, the deployed row %s', size(E.RES, 1), numel(POL), sum(isr), POL{dc}));
+if ~sz, G = struct('pass', false, 'rows', r); return; end
+nS = size(E.RES, 1);
+[b1, b2] = deal({});
+for c = 1:numel(POL)
+    if isd(c), continue; end
+    if isr(c), R = D; else, R = E; end
+    for si = 1:nS
+        if ~isequaln(N.RES{si, c}, R.RES{si, c}), b1{end+1} = sprintf('%s set %d', POL{c}, si); end %#ok<AGROW>
+    end
+    if ~isequaln(cell_at(N, 'ALL', c), cell_at(R, 'ALL', c)), b1{end+1} = sprintf('%s pooled', POL{c}); end %#ok<AGROW>
+    if ~isequaln(cell_at(N, 'RW', c), cell_at(R, 'RW', c)), b1{end+1} = sprintf('%s clean pools', POL{c}); end %#ok<AGROW>
+    if isr(c), b2{end+1} = POL{c}; end %#ok<AGROW>
+end
+if ~isequal(numel(field_or(N, 'RW', {})), numel(field_or(E, 'RW', {}))), b1{end+1} = 'RW size'; end
+if ~isequaln(lbc_strip(field_or(N, 'LBC', [])), lbc_strip(field_or(E, 'LBC', []))), b1{end+1} = 'LBC (DQN columns)'; end
+if ~isequaln(lbc_strip(field_or(D, 'LBC', [])), lbc_strip(field_or(E, 'LBC', []))), b1{end+1} = 'LBC of the base'; end
+r(end+1) = row('other columns', isempty(b1), sprintf(['%d columns x %d sets, pooled, clean pools: the registered file''s; ' ...
+    'the rule rows (%s) the base''s; LBC as registered but its rule column%s'], sum(~isd), nS, strjoin(b2, ', '), list_txt('; differ: ', b1)));
+ch = {};
+for si = 1:nS
+    if ~isequaln(N.RES{si, dc}, E.RES{si, dc}), ch{end+1} = E.set_names{si}; end %#ok<AGROW>
+end
+r(end+1) = row('setting applied', ~isempty(ch), sprintf('the deployed row %s differs from the registered one on: %s', POL{dc}, ...
+    ternary(isempty(ch), 'no set', strjoin(ch, ', '))));
+r(end+1) = row('RS2', isfield(N, 'RS2') == isfield(E, 'RS2'), sprintf('the deployed policy, second test split: %s', ...
+    ternary(~isfield(E, 'RS2'), 'not in the registered file', ternary(isequaln(field_or(N, 'RS2', []), field_or(E, 'RS2', [])), ...
+    'as registered', 'read with the hop layer (no reference)'))));
+if isfield(E, 'KP') && isfield(N, 'KP') && isfield(D, 'KP')
+    [bad, part, own] = kp_hop_guard(N.KP, D.KP, POL{dc}, E.LBL{dc});
+    r(end+1) = row('KP', isempty(bad), sprintf(['every field isequaln to the base''s KP but the deployed row''s entries%s%s; ' ...
+        'the deployed policy''s own readings (no reference): %s'], list_txt('; compared without them: ', part), ...
+        list_txt('; differ: ', bad), ternary(isempty(own), 'none', strjoin(own, ', '))));
+else
+    r(end+1) = row('KP', isfield(E, 'KP') == isfield(N, 'KP'), 'no KP');
+end
+G = struct('pass', all([r.ok]), 'rows', r);
+end
+
+function [bad, part, own] = kp_hop_guard(Nk, Dk, dep, dlbl)
+% KP field by field against the base's: equal, or equal without the deployed row's column or
+% entries (part); a field with no such column: the deployed policy's own reading (own).
+bad = {}; part = {}; own = {};
+f = union(fieldnames(Dk), fieldnames(Nk));
+dshow = [];
+if isfield(Dk, 'show') && iscell(Dk.show), dshow = strcmp(Dk.show, dep); end
+for j = 1:numel(f)
+    if ~isfield(Dk, f{j}) || ~isfield(Nk, f{j}), bad{end+1} = [f{j} ' (on one side only)']; continue; end %#ok<AGROW>
+    a = Nk.(f{j}); b = Dk.(f{j});
+    if isequaln(a, b), continue; end
+    [same, how] = nonrule_equal(a, b, dshow, {dlbl, dep});
+    if strcmp(how, 'not compared'), own{end+1} = f{j}; %#ok<AGROW>
+    elseif same, part{end+1} = sprintf('%s (%s)', f{j}, strrep(how, 'non-rule', 'non-deployed')); %#ok<AGROW>
+    else, bad{end+1} = f{j}; end %#ok<AGROW>
+end
+end
+
+%% ----- hop: gate -----
+function V = hop_gate(tag, tree, O)
+% The hop reading confirmed on its fresh test set, frozen on this tree and the rule fix's setting;
+% the deployed policy still the DQN under both (the base overlay's gate, the trained file).
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X, Sh] = open_hop(tag, tree, O);
+need(X, 'c2e', 'the gate');
+assert(~isfile(X.v.gate), 'adopt_reading:exists', 'adopt_reading: %s exists; the gate is read once', X.v.gate);
+check_outputs(X, {'c2e'});
+CFG = cfg_of(M);
+S = jsondecode(fileread(Sh.sel));
+rows = struct('file', {}, 'ok', {}, 'why', {});
+rows(end+1) = row('setting', strcmp(S.adopted.dqn_hop, CFG.adopt.dqn_hop) && strcmp(S.d124.adopted, CFG.adopt.rule_fix), ...
+    sprintf('selection.json adopted dqn_hop=%s on rule_fix %s; the manifest dqn_hop=%s on %s', S.adopted.dqn_hop, ...
+    S.d124.adopted, CFG.adopt.dqn_hop, CFG.adopt.rule_fix));
+T = load(Sh.test, 'verdict');
+[ok, why] = confirmed(T, 'dqn_hop');
+rows(end+1) = row('test verdict', ok, why);
+cp = fullfile(tree, 'results', 'read_once', 'weak19_selection.json');
+rows(end+1) = row('frozen copy', isfile(cp) && strcmp(text_sha(cp), Sh.h.selection), sprintf('%s %s', cp, ...
+    ternary(isfile(cp), 'compared with selection.json', 'absent')));
+Vb = read_verdict(fullfile(M.base.dir, 'gate.json'));
+Q = load(fullfile(X.on, 'data', 'trained_dqn.mat'), 'deployed');
+rows(end+1) = row('deployed', isequal(Vb.pass, true) && strcmp(Vb.deployed, Q.deployed) && strcmp(S.deployed, Q.deployed) && ...
+    startsWith(Q.deployed, 'dqn'), sprintf(['the base''s gate deploys %s under the rule fix; the hop reading read %s; ' ...
+    'registered %s (the hop layer acts on the DQN kinds only)'], Vb.deployed, S.deployed, Q.deployed));
+V = verdict(X, 'gate', rows, struct('deployed', Q.deployed));
+if ~V.pass, error('adopt_reading:gate', 'adopt_reading: the gate failed (see %s); nothing further runs', X.t.gate); end
+end
+
+function [ok, why] = confirmed(T, step)
+% The registered verdict of the fresh read: step passes Holm and every guard (weak19_reading.m verdict).
+ok = false; why = 'test.mat holds no verdict';
+if ~isfield(T, 'verdict') || ~isstruct(T.verdict) || ~all(isfield(T.verdict, {'step', 'confirmed'})), return; end
+st = T.verdict.step; if ischar(st), st = {st}; end
+k = find(strcmp(st, step), 1);
+if isempty(k), why = sprintf('test.mat reads %s, not %s', strjoin(st, ', '), step); return; end
+ok = logical(T.verdict.confirmed(k));
+why = sprintf('%s: %s on the fresh test set', step, ternary(ok, 'CONFIRMED', 'NOT CONFIRMED'));
+end
+
+%% ----- hop: c2gu -----
+function V = hop_c2gu(tag, tree, O)
+% C2g and C2u in on/ with the adoption: their hybrid columns carry the hop layer; every other column,
+% the retrained agents and the leave-one-out agents isequaln to the registered ones. Started again
+% after a stop, an experiment whose outputs are whole is kept; run_cache keeps finished entities.
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
+need(X, 'gate', 'the c2gu stage');
+assert(~isfile(X.v.c2gu), 'adopt_reading:exists', 'adopt_reading: %s exists; the c2gu stage runs once', X.v.c2gu);
+check_outputs(X, {'c2e'});
+check_threads(K, 'the c2gu stage');
+check_tree(X, tree);
+[pok, pwhy] = path_ok(X, tree, K.code_fns);
+assert(pok, 'adopt_reading:path', 'adopt_reading: the c2gu stage is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
+CFG = cfg_of(M);
+lg = start_log(X, 'c2gu'); %#ok<NASGU>
+H0 = read_lines(X.sha);
+rows = struct('file', {}, 'ok', {}, 'why', {});
+ex = {'experiment_combo_generalization', K.c2gu_res(1:2); 'experiment_unknown_threat', [K.c2gu_res(3:4), K.c2gu_data]};
+for k = 1:size(ex, 1)
+    have = all(cellfun(@(f) isfile(fullfile(X.on, f)), ex{k, 2}));
+    t0 = tic; err = '';
+    if ~have, err = run_in(X.on, ex{k, 1}, CFG); end
+    rows(end+1) = row(ex{k, 1}, isempty(err), sprintf('%s; %.1f min, %d threads', ternary(have, 'kept from an earlier start', ...
+        ternary(isempty(err), 'ran', err)), toc(t0) / 60, maxNumCompThreads)); %#ok<AGROW>
+end
+rows(end+1) = row('tree SHA-256', isequal(hash_lines(tree, tree_files(tree)), H0), sprintf('%d files of results and inputs, before and after', numel(H0)));
+if all([rows.ok])
+    g = load(fullfile(X.on, 'results', 'combo_generalization.mat'), 'res'); g0 = load(fullfile(tree, 'results', 'combo_generalization.mat'), 'res');
+    rows = [rows, hybrid_rows('C2g', g.res, g0.res, 'combo')];
+    u = load(fullfile(X.on, 'results', 'unknown_threat_policy.mat')); u0 = load(fullfile(tree, 'results', 'unknown_threat_policy.mat'));
+    rows = [rows, hybrid_rows('C2u', u.res, u0.res, 'threat')];
+    ep = isfield(u, 'EP') && isfield(u0, 'EP') && isequaln(strip_lb(u.EP), strip_lb(u0.EP));
+    rows(end+1) = row('C2u episodes', ep, 'every episode''s columns but the hybrid ones isequaln to the registered EP');
+    a = load(fullfile(X.on, K.c2gu_data{1})); a0 = load(fullfile(tree, K.c2gu_data{1}));
+    rows(end+1) = row('C2u agents', isequaln(a, a0), sprintf('%s: %s', K.c2gu_data{1}, ternary(isequaln(a, a0), ...
+        'every leave-one-out agent isequaln to the registered file', ['differs: ' strjoin(diff_fields(a, a0), ', ')])));
+end
+V = verdict(X, 'c2gu', rows, struct('outputs', {out_hashes(X.on, K.c2gu_out)}, 'threads', maxNumCompThreads, ...
+    'code_sha256', M.checkout_code_sha256));
+if ~V.pass, error('adopt_reading:c2gu', 'adopt_reading: the c2gu stage failed its guards (see %s)', X.t.c2gu); end
+end
+
+function rows = hybrid_rows(name, res, res0, key)
+% res against the registered res0: the same entities; every field but the hybrid (_lb) ones
+% isequaln (the retrained agents reproduced); the hybrid fields present, those that moved named.
+rows = struct('file', {}, 'ok', {}, 'why', {});
+same = isequal(size(res), size(res0)) && isequal({res.(key)}, {res0.(key)});
+f = fieldnames(res0); lb = f(endsWith(f, '_lb'));
+rows(end+1) = row([name ' entities'], same && ~isempty(lb) && isequal(sort(fieldnames(res)), sort(f)), ...
+    sprintf('%d %s entities, hybrid fields %s', numel(res0), key, ternary(isempty(lb), 'none (no hybrid columns registered)', strjoin(lb', ', '))));
+if ~same, return; end
+bad = {}; mv = {};
+for i = 1:numel(res0)
+    if ~isequaln(strip_lb(res(i)), strip_lb(res0(i))), bad{end+1} = res0(i).(key); end %#ok<AGROW>
+    if ~isequaln(res(i), res0(i)), mv{end+1} = res0(i).(key); end %#ok<AGROW>
+end
+rows(end+1) = row([name ' other columns'], isempty(bad), sprintf('learner, trained, rule and table columns isequaln to the registered file%s', ...
+    list_txt('; differ: ', bad)));
+rows(end+1) = row([name ' hybrid columns'], true, sprintf('read with the hop layer (no reference); moved: %s', ...
+    ternary(isempty(mv), 'none', strjoin(mv, ', '))));
+end
+
+function s = strip_lb(s)
+if ~isstruct(s), return; end
+f = fieldnames(s); s = rmfield(s, f(endsWith(f, '_lb')));
+end
+
+%% ----- hop: edge and lat -----
+function V = hop_edge(tag, tree, O)
+% The edge map in on/ with the hop layer on the deployed policy: the flight tables and the runs
+% isequaln to the registered ones, link_budget the registered file's.
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
+need(X, 'c2gu', 'the edge stage');
+assert(~isfile(X.v.edge), 'adopt_reading:exists', 'adopt_reading: %s exists; the edge stage runs once', X.v.edge);
+check_outputs(X, {'c2e', 'c2gu'});
+check_threads(K, 'the edge stage');
+check_tree(X, tree);
+[pok, pwhy] = path_ok(X, tree, K.code_fns);
+assert(pok, 'adopt_reading:path', 'adopt_reading: the edge stage is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
+lg = start_log(X, 'edge'); %#ok<NASGU>
+H0 = read_lines(X.sha);
+t0 = tic; err = run_in(X.on, 'edge_map', cfg_of(M));
+rows = struct('file', {}, 'ok', {}, 'why', {});
+rows(end+1) = row('edge_map', isempty(err), sprintf('%s; %.1f min, %d threads', ternary(isempty(err), 'ran', err), toc(t0) / 60, maxNumCompThreads));
+rows(end+1) = row('tree SHA-256', isequal(hash_lines(tree, tree_files(tree)), H0), sprintf('%d files of results and inputs, before and after', numel(H0)));
+if isempty(err)
+    miss = K.edge_out(~cellfun(@(f) isfile(fullfile(X.on, f)), K.edge_out));
+    rows(end+1) = row('outputs', isempty(miss), sprintf('%d files%s', numel(K.edge_out), list_txt('; missing: ', miss)));
+    N = load(fullfile(X.on, 'results', 'edge_map.mat')); E = load(fullfile(tree, 'results', 'edge_map.mat'));
+    for f = K.edge_same
+        e = isfield(N, f{1}) && isfield(E, f{1}) && isequaln(N.(f{1}), E.(f{1}));
+        rows(end+1) = row(['edge_map ' f{1}], e, ternary(e, 'isequaln to the registered file', 'differs from the registered file')); %#ok<AGROW>
+    end
+    for f = {'results/link_budget.txt', 'results/link_budget.mat'}
+        [ok, why] = compare_file(fullfile(X.on, f{1}), fullfile(tree, f{1}));
+        rows(end+1) = row(f{1}, ok, why); %#ok<AGROW>
+    end
+    [ka, va] = flat_kv(N.EM, 'EM'); [kb, vb] = flat_kv(E.EM, 'EM'); mb = kv_map(kb, vb);
+    nd = sum(cellfun(@(k, v) ~isKey(mb, k) || ~isequaln(mb(k), v), ka, va));
+    rows(end+1) = row('edge_map EM', true, sprintf('%d of %d values differ from the registered map (the deployed policy with the hop layer, no reference)', nd, numel(ka)));
+end
+V = verdict(X, 'edge', rows, struct('outputs', {out_hashes(X.on, K.edge_out)}, 'threads', maxNumCompThreads, ...
+    'code_sha256', M.checkout_code_sha256));
+if ~V.pass, error('adopt_reading:edge', 'adopt_reading: the edge stage failed its guards (see %s)', X.t.edge); end
+end
+
+function V = hop_lat(tag, tree, O)
+% KPI 7 in on/ with the hop layer in the deployed chain: a timing, read once; the detector and the
+% deployed policy's stamp the registered ones.
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
+need(X, 'edge', 'the lat stage');
+assert(~isfile(X.v.lat), 'adopt_reading:exists', 'adopt_reading: %s exists; the lat stage runs once', X.v.lat);
+assert(isempty(getenv('LAT_DET_FIRST')), 'adopt_reading:lat', 'adopt_reading: LAT_DET_FIRST is set: the diagnostic order is not the registered one');
+check_outputs(X, {'c2e', 'c2gu', 'edge'});
+check_tree(X, tree);
+[pok, pwhy] = path_ok(X, tree, K.code_fns);
+assert(pok, 'adopt_reading:path', 'adopt_reading: the lat stage is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
+lg = start_log(X, 'lat'); %#ok<NASGU>
+H0 = read_lines(X.sha);
+t0 = tic; err = run_in(X.on, 'measure_latency', cfg_of(M));
+rows = struct('file', {}, 'ok', {}, 'why', {});
+rows(end+1) = row('measure_latency', isempty(err), sprintf('%s; %.1f min, %d threads', ternary(isempty(err), 'ran', err), toc(t0) / 60, maxNumCompThreads));
+rows(end+1) = row('tree SHA-256', isequal(hash_lines(tree, tree_files(tree)), H0), sprintf('%d files of results and inputs, before and after', numel(H0)));
+if isempty(err)
+    N = load(fullfile(X.on, 'results', 'latency.mat'), 'LAT'); E = load(fullfile(tree, 'results', 'latency.mat'), 'LAT');
+    ids = all(isfield(N.LAT, {'det_id', 'policy_stamp'})) && strcmp(N.LAT.det_id, E.LAT.det_id) && strcmp(N.LAT.policy_stamp, E.LAT.policy_stamp);
+    rows(end+1) = row('detector and stamp', ids, 'the registered detector and deployed policy''s stamp (the adoption is not in the stamp)');
+    rows(end+1) = row('deployed cycle', true, sprintf('median %.3f ms, p95 %.3f ms (registered %.3f, %.3f); a timing, read once', ...
+        num_or(N.LAT, 'total_dep_median_ms'), num_or(N.LAT, 'total_dep_p95_ms'), num_or(E.LAT, 'total_dep_median_ms'), ...
+        num_or(E.LAT, 'total_dep_p95_ms')));
+end
+V = verdict(X, 'lat', rows, struct('outputs', {out_hashes(X.on, K.lat_out)}, 'threads', maxNumCompThreads, ...
+    'code_sha256', M.checkout_code_sha256));
+if ~V.pass, error('adopt_reading:lat', 'adopt_reading: the lat stage failed (see %s)', X.t.lat); end
+end
+
+function v = num_or(S, f)
+v = NaN; if isstruct(S) && isfield(S, f) && isnumeric(S.(f)) && isscalar(S.(f)), v = S.(f); end
+end
+
+function err = run_in(root, name, CFG)
+% The script name in root, CFG in its workspace (it reads CFG.adopt from there); '' or the error.
+err = '';
+c0 = cd(root);
+try
+    run_cfg(name, CFG);
+catch e
+    err = e.message;
+end
+cd(c0);
+close all
+end
+
+function run_cfg(script_name__, CFG) %#ok<INUSD>
+% A workspace that holds CFG alone for the script.
+run(script_name__);
+end
+
+%% ----- hop: render and release -----
+function V = hop_render(tag, tree, O)
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X] = open_hop(tag, tree, O); K = reg_hop();
+need(X, 'lat', 'the render');
+assert(~isfile(X.v.render) && ~any(cellfun(@(f) isfile(fullfile(X.on, f)), [K.render_out, {K.note_file}])) && ...
+    ~isfolder(fullfile(X.on, 'profiles')), 'adopt_reading:exists', ...
+    'adopt_reading: %s or rendered outputs in %s exist; the render runs once', X.v.render, X.on);
+check_outputs(X, {'c2e', 'c2gu', 'edge', 'lat'});
+[pok, pwhy] = path_ok(X, tree, K.code_fns);
+assert(pok, 'adopt_reading:path', 'adopt_reading: the render is refused: %s, not from %s', pwhy, fullfile(X.root, 'code'));
+lg = start_log(X, 'render'); %#ok<NASGU>
+tab = has_table(tree);
+s0 = snapshot(tree);
+err = render_in(X.on, tab);
+rows = struct('file', {}, 'ok', {}, 'why', {});
+rows(end+1) = row('renderers', isempty(err), list_txt('ran: ', err));
+s1 = snapshot(tree);
+rows(end+1) = row('tree untouched', isequal(s0, s1), snap_why(s0, s1, 'the tree but .git and logs/'));
+for s = {'c2e', 'c2gu', 'edge', 'lat'}
+    [ok, why] = rec_ok(X.on, read_verdict(X.v.(s{1})), X.v.(s{1}));
+    rows(end+1) = row([s{1} ' outputs'], ok, why); %#ok<AGROW>
+end
+outs = K.final; if tab, outs = [outs, K.table]; end
+for f = outs
+    a = fullfile(X.on, f{1}); b = fullfile(X.off, f{1});
+    if ~isfile(a), rows(end+1) = row(f{1}, false, 'not produced'); continue; end %#ok<AGROW>
+    same = false; if isfile(b), same = compare_file(a, b); end
+    rows(end+1) = row(f{1}, true, sprintf('SHA-256 %s; %s', sha_file(a), ternary(same, 'as off', 'differs from off'))); %#ok<AGROW>
+end
+st = stale_files(fullfile(X.on, 'results', 'report_numbers.json'));
+s_off = stale_files(fullfile(X.off, 'results', 'report_numbers.json'));
+add = setdiff(st, s_off);
+rows(end+1) = row('stale files', isfile(fullfile(X.on, 'results', 'report_numbers.json')) && all(ismember(add, K.stale_add)), ...
+    sprintf('off: %s; on: %s (none may be added)', ternary(isempty(s_off), 'none', strjoin(s_off, ', ')), ternary(isempty(st), 'none', strjoin(st, ', '))));
+CFG = cfg_of(M);
+note = {sprintf('Adopted: rule_fix %s, then dqn_hop %s.', CFG.adopt.rule_fix, CFG.adopt.dqn_hop), ...
+    ['policy_evaluation.mat: the rule rows carry the rule fix (isequaln to the rule-fix overlay''s rows); the deployed DQN''s ' ...
+    'row carries the hop layer; every other row is the registered one.'], ...
+    ['combo_generalization and unknown_threat_policy: the hybrid (DQN + link-budget completion) columns carry the hop ' ...
+    'layer; the learner, trained, rule and table columns and every agent are the registered ones.'], ...
+    ['edge_map and latency: the deployed policy with the hop layer; the rule column of the edge map stays the rule without ' ...
+    'the layered answer.'], ...
+    ['data/trained_dqn.mat is not changed: its stamp (policy_stamp.m) does not carry the adoption, which lives in CFG.adopt ' ...
+    'and in this note.'], ...
+    sprintf('Stale files after the render (result_status.m, report_numbers.json): %s', ternary(isempty(st), 'none', strjoin(st, ', ')))};
+write_once(fullfile(X.on, K.note_file), note);
+V = verdict(X, 'render', rows, struct('stale', {st}, 'note', {note}, 'code_sha256', M.checkout_code_sha256));
+if ~V.pass, error('adopt_reading:render', 'adopt_reading: the render failed (see %s)', X.t.render); end
+end
+
+function V = hop_release(tag, tree, O)
+% The write attribute back on every tree data file that had it before this overlay (through the
+% off root's link: the attribute is the file's); with O.release_base true also on those the base
+% overlay made read-only (writable before it), for a base that cannot run its own release. The
+% manifest and the tree are checked; the pins are not (the release only gives attributes back).
+if nargin < 3, O = struct(); end
+tree = canon(tree); [M, X] = open_hop(tag, tree, O, true);
+dl = as_cell(M.data_links); ro = as_cell(M.readonly_before);
+wb = isstruct(O) && isfield(O, 'release_base') && isequal(O.release_base, true);
+ro_b = {}; note = {'The overlay is closed: every stage refuses on it.'};
+if wb
+    B = jsondecode(fileread(fullfile(M.base.dir, 'adoption.json')));
+    if isfile(fullfile(M.base.dir, 'release.json'))
+        wb = false; note{end+1} = 'The base overlay had released its files itself.';
+    else
+        ro_b = as_cell(B.readonly_before);
+        ro = setdiff(ro, setdiff(as_cell(B.data_links), ro_b));   % writable before the base overlay
+        note{end+1} = sprintf(['The base overlay %s made %d of these files read-only and has not released them; this release ' ...
+            'gives them back too (writable before it). Its own release stays refused.'], M.base.dir, numel(as_cell(B.data_links)) - numel(ro_b));
+    end
+end
+rows = struct('file', {}, 'ok', {}, 'why', {});
+for k = 1:numel(dl)
+    f = dl{k}; lnk = fullfile(X.off, f); src = fullfile(tree, f);
+    if ismember(f, ro)
+        rows(end+1) = row(f, ~java.io.File(src).canWrite(), 'read-only before: kept read-only'); %#ok<AGROW>
+        continue
+    end
+    ok = isfile(lnk) && isfile(src) && java.nio.file.Files.isSameFile(jpath(lnk), jpath(src));
+    if ok, ok = fileattrib(lnk, '+w'); end
+    rows(end+1) = row(f, ok && java.io.File(src).canWrite(), 'writable again, as before'); %#ok<AGROW>
+end
+V = verdict(X, 'release', rows, struct('note', {note}, 'base_released', wb));
+if ~V.pass, error('adopt_reading:release', 'adopt_reading: the release failed (see %s)', X.t.release); end
+end
+
 %% ===================== Renderers =====================
 function err = render_in(root, tab)
 % The final phase's KPI, DASH and RPT, the KPI table where this code has it, and the bundle, in root
@@ -722,10 +1481,10 @@ if isstruct(x), s = {x.file}; elseif iscell(x), s = cellfun(@(y) y.file, x, 'Uni
 s = reshape(s, 1, []);
 end
 
-function D = code_diff(root, tree)
+function D = code_diff(root, tree, may)
 % The .m files of root/code and tree/code (tests/ aside) whose text differs, line ends aside, or
-% that only one side holds; bad: those outside the adoption's own files.
-K = reg();
+% that only one side holds; bad: those outside may (default: the adoption's own files).
+K = reg(); if nargin < 3, may = K.may_differ; end
 a = m_files(fullfile(root, 'code')); b = m_files(fullfile(tree, 'code'));
 differ = {};
 for f = reshape(union(a, b), 1, [])
@@ -735,7 +1494,7 @@ for f = reshape(union(a, b), 1, [])
         differ{end+1} = f{1}; %#ok<AGROW>
     end
 end
-D = struct('differ', {differ}, 'bad', {setdiff(differ, K.may_differ)});
+D = struct('differ', {differ}, 'bad', {setdiff(differ, may)});
 end
 
 function F = m_files(d)
@@ -765,10 +1524,10 @@ L = strtrim(strrep(regexprep(L, '^.. ', ''), '"', ''));
 d = L(endsWith(L, '.m') & ~startsWith(L, 'code/tests/'));
 end
 
-function [ok, why] = path_ok(X, tree)
+function [ok, why] = path_ok(X, tree, fns)
 % The decision and KPI code resolves into this checkout's code, and the tree's code is not on the path.
-K = reg();
-w = cellfun(@which, K.code_fns, 'UniformOutput', false);
+K = reg(); if nargin < 3, fns = K.code_fns; end
+w = cellfun(@which, fns, 'UniformOutput', false);
 ok = all(cellfun(@(p) ~isempty(p) && under(p, fullfile(X.root, 'code')), w)) && ~contains(lower(path), lower(fullfile(tree, 'code')));
 why = sprintf('the code runs from %s', strjoin(w, ', '));
 end

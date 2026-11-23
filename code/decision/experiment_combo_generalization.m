@@ -49,9 +49,12 @@ if LBC
         'dqn_out_lb', {}, 'dqn_in_lb', {}, 'ci_out_lb', {}, 'ci_in_lb', {});
 end
 cfgc = []; if exist('CFG', 'var'), cfgc = CFG; end
+ADP = adopt_options(cfgc);                           % adopted settings (CFG.adopt, adopt_options.m), off by default
+if ADP.on, Q.adopt = ADP; end                        % the entities read the adoption through Q
 CDIR = run_cache('dir', run_cache('on', cfgc), 'C2g'); CID = '';     % every combination kept as it finishes (run_cache.m)
 if ~isempty(CDIR), CID = run_cache('inputs', {'data/policy_pools.mat', 'data/trained_dqn.mat'}); end
 lbkey = {}; if LBC, lbkey = {'lb_columns'}; end          % the entities' results hold the completion's columns
+lbkey = [lbkey, adopt_options('key', ADP)];          % the DQN layers adopted, when any
 keys = cellfun(@(cn) run_cache('key', [{CID, 'C2g', cn, H, seed, REPS, NE, TEST, DK}, lbkey]), combos, 'UniformOutput', false);
 t0 = tic;
 out = run_cache('each', CDIR, keys, @(ci) one_combo(ci, combos, PP, K, Q, H, seed, nS, TEST, REPS, NE, DK, t0, LBC), combos);
@@ -63,6 +66,7 @@ rep{end+1} = sprintf(['Generated: %s | DQN retrained without the combination (tr
     datestr(now), PP.alarm_mode, PP.confirm, Q.seed_summary.selected_fa_pen, H.gamma, seed, numel(K.geo{K.clean, TEST}));
 for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end    % the penalty's form, when C2 trained the no-threat form
 rep{end+1} = 'Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable episodes; [95% bootstrap over geometries].';
+if ~isempty(adopt_options('key', ADP)), rep{end+1} = adopt_options('note', ADP, 'dqn'); end
 rep{end+1} = '';
 rep{end+1} = sprintf('%-32s %6s %24s %24s %10s %10s', 'combination', 'n', 'DQN, never trained', 'DQN, trained', 'rule+esc', 'table');
 for i = 1:numel(res)
@@ -131,6 +135,7 @@ r = struct('combo', combos{ci}, 'n', sum(m), 'dqn_out', mean(Ro.recovered(m)), '
     'rule', mean(Rr.recovered(m)), 'table', mean(Rt.recovered(m)), 'ci_out', [lo1 hi1], 'ci_in', [lo2 hi2]);
 if LBC
     opt1 = struct('monitor', struct('lb_complete', true));
+    if isfield(Q, 'adopt'), opt1 = adopt_options('dqn', Q.adopt, opt1); end   % the deployed DQN's adopted layers
     Ro1 = mark(dqn_eval_batches(DK, PP, K, specs, ag, opt1, 7000, TEST), specs, PP);
     Ri1 = mark(dqn_eval_batches(DK, PP, K, specs, Q.agent, opt1, 7000, TEST), specs, PP);
     [~, lo3, hi3] = boot_cluster(double(Ro1.recovered(m)), ones(1, sum(m)), Ro1.geom(m), 2000, 3);
