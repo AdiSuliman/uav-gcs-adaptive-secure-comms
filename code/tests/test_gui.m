@@ -528,6 +528,29 @@ end
 clear back
 end
 
+%% ---------- the scripted capture ----------
+function test_capture_plan_covers_all_threats(tc)
+% The live runs: clean at two levels, then the four attacks at the middle level.
+lv = [0 2 4 6 9 12 15]; thr = {'jamming', 'tone_jamming', 'antenna_fault', 'airframe_shadowing', 'none'};
+[runs, ebs, note] = capture_gui_plan(lv, thr, []);
+verifyEqual(tc, runs, {'none', 'none', 'tone_jamming', 'jamming', 'antenna_fault', 'airframe_shadowing'});
+verifyEqual(tc, ebs, [4 15 4 4 4 4]);
+verifyNotEmpty(tc, strfind(note, 'not in this bundle'));
+[~, ~, note2] = capture_gui_plan(lv, thr, struct('N', 3));
+verifyEmpty(tc, strfind(note2, 'not in'));
+[runs, ebs] = capture_gui_plan([6 9 12], {'jamming'}, []);       % no level 4: the middle one; unlisted threats are left out
+verifyEqual(tc, runs, {'none', 'none', 'jamming'});
+verifyEqual(tc, ebs, [9 12 9]);
+end
+
+function test_capture_plan_threats_exist_in_console(tc)
+% Every threat of the plan is a row of the console's threat list.
+src = fileread(fullfile(tc.TestData.root, 'code', 'gui', 'demo_gui.m'));
+for t = {'tone_jamming', 'jamming', 'antenna_fault', 'airframe_shadowing'}
+    verifyNotEmpty(tc, strfind(src, [ t{1} ]));
+end
+end
+
 %% ---------- the session summary ----------
 function test_session_summary_na_without_recovery(tc)
 % Runs on a clean link carry no recovery (rec_dqn and rec_rule are NaN): the summary reads N/A there,
