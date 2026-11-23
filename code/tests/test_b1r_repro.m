@@ -20,9 +20,12 @@ rm_all(tc.TestData.tmp);
 end
 
 %% ---------- the synthetic tree ----------
-function tree = make_tree(tc, name)
+function tree = make_tree(tc, name, draws)
+if nargin < 3, draws = '20000 + 1000*si'; end
 tree = fullfile(tc.TestData.tmp, name);
-mkdir(fullfile(tree, 'results', 'sub')); mkdir(fullfile(tree, 'data'));
+mkdir(fullfile(tree, 'results', 'sub')); mkdir(fullfile(tree, 'data')); mkdir(fullfile(tree, 'code', 'decision'));
+write(fullfile(tree, 'code', 'decision', 'evaluate_policies.m'), ...
+    {['        RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, ' draws ');']});
 params = struct('n_rx', 3); %#ok<NASGU>
 save(fullfile(tree, 'params.mat'), 'params');
 RES = {1, [2 3; 4 5]}; KP = struct('a', 1.5, 'generated', 'x'); %#ok<NASGU>
@@ -153,6 +156,41 @@ rows = b1r_repro('policy', C, 'off', out2, O);
 k = {rows.kind}; n = {rows.name};
 tc.verifyEqual(k{strcmp(n, 'results/policy_evaluation.mat')}, 'DIFF');
 tc.verifyEqual(k{strcmp(n, 'results/policy_evaluation.txt')}, 'DIFF');
+end
+
+function test_tree_draws(tc)
+% Profile 1's C2e drew 30000 + 100 x set: the policy stage runs a copy of this code's
+% evaluate_policies.m in the root with those draws in its five draw expressions and nothing else.
+src = fileread(fullfile(tc.TestData.root, 'code', 'decision', 'evaluate_policies.m'));
+new = b1r_repro('draw_copy', src, [20000 1000], [30000 100]);
+tc.verifyNumElements(strfind(new, 'ag, opt, 30000 + 100*si);'), 1);
+tc.verifyNumElements(strfind(new, 'ag, o0, 30000 + 100 * si);'), 2);
+tc.verifyNumElements(strfind(new, 'ag, o1, 30000 + 100 * si);'), 2);
+tc.verifyEmpty(regexp(new, 'ag, o[01p]t?, 20000 \+ 1000 ?\* ?si\)', 'once'));
+back = strrep(strrep(strrep(new, 'ag, opt, 30000 + 100*si);', 'ag, opt, 20000 + 1000*si);'), ...
+    'ag, o0, 30000 + 100 * si);', 'ag, o0, 20000 + 1000 * si);'), 'ag, o1, 30000 + 100 * si);', 'ag, o1, 20000 + 1000 * si);');
+tc.verifyEqual(back, src, 'only the draw expressions change');
+tc.verifyError(@() b1r_repro('draw_copy', 'no draws here', [20000 1000], [30000 100]), 'b1r_repro:draws');
+tree = make_tree(tc, 'tree_d', '30000 + 100*si');
+out = fullfile(tc.TestData.tmp, 'out_d'); mkdir(out);
+C = b1r_repro('config', 'p1');
+C.tree = tree; C.bundle_ref = fullfile(tc.TestData.tmp, 'no_bundle'); C.repo = tc.TestData.root;
+O = struct('eval_fn', @(root, cfg) stub_eval(root, tree, 0), 'render_fn', @(root, tab) stub_render(root, tree));
+rows = b1r_repro('policy', C, 'off', out, O);
+r = rows(strcmp({rows.name}, 'frame draws'));
+tc.verifyNumElements(r, 1);
+tc.verifyTrue(startsWith(r.detail, '30000 + 100 x set, the tree''s own C2e draws'), r.detail);
+f = fullfile(out, 'off', 'evaluate_policies.m');
+tc.verifyTrue(isfile(f));
+tc.verifyEqual(fileread(f), new);
+tree2 = make_tree(tc, 'tree_d2');
+out2 = fullfile(tc.TestData.tmp, 'out_d2'); mkdir(out2);
+C.tree = tree2;
+O.eval_fn = @(root, cfg) stub_eval(root, tree2, 0);
+rows = b1r_repro('policy', C, 'off', out2, O);
+r = rows(strcmp({rows.name}, 'frame draws'));
+tc.verifyEqual(r.detail, '20000 + 1000 x set, the tree''s own and this code''s');
+tc.verifyFalse(isfile(fullfile(out2, 'off', 'evaluate_policies.m')));
 end
 
 function stub_eval(root, tree, delta)

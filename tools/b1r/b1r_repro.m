@@ -41,6 +41,7 @@ switch cmd
     case 'policy',      R = stage_policy(varargin{:});
     case 'stage',       R = one_stage(varargin{:});
     case 'summary',     R = summary(varargin{:});
+    case 'draw_copy',   R = draw_copy(varargin{:});
     otherwise, error('b1r_repro:cmd', 'b1r_repro: unknown command %s', cmd);
 end
 end
@@ -183,6 +184,7 @@ LO = left_out(mode);
 build_root(root, C.tree, LO.rel);
 cfg = [];
 if strcmp(mode, 'on'), cfg = adopt_reading('cfg', jsondecode(fileread(fullfile(C.ad_root, 'adoption.json')))); end
+rows(end+1) = tree_draws(C, root, st);
 eval_fn = hook(O, 'eval_fn', @run_eval);
 render_fn = hook(O, 'render_fn', @render_here);
 t0 = tic;
@@ -243,9 +245,39 @@ end
 
 function run_eval(root, cfg)
 % evaluate_policies.m in root: it reads CFG (CFG.adopt) from this workspace, relative paths from the cwd.
+% The copy tree_draws wrote in root runs when there is one, else this checkout's file.
 c0 = cd(root); back = onCleanup(@() cd(c0)); %#ok<NASGU>
 maxNumCompThreads(8);
-if isempty(cfg), run('evaluate_policies'); else, CFG = cfg; run('evaluate_policies'); end %#ok<NASGU>
+f = 'evaluate_policies'; if isfile(fullfile(root, 'evaluate_policies.m')), f = fullfile(root, 'evaluate_policies.m'); end
+if isempty(cfg), run(f); else, CFG = cfg; run(f); end %#ok<NASGU>
+end
+
+function r = tree_draws(C, root, st)
+% The tree's own C2e frame draws (D124 point 7): profile 1's C2e drew 30000 + 100 x set, this code
+% draws 20000 + 1000 x set. When they differ, root gets a copy of this checkout's
+% evaluate_policies.m with the tree's base and step in the five draw expressions, nothing else.
+src = fileread(fullfile(C.repo, 'code', 'decision', 'evaluate_policies.m'));
+mine = rule_fix_reading('draws', C.repo); tree = rule_fix_reading('draws', C.tree);
+if isequal(mine, tree)
+    r = mkrow(st, 'frame draws', 'info', sprintf('%d + %d x set, the tree''s own and this code''s', tree)); return
+end
+new = draw_copy(src, mine, tree);
+fid = fopen(fullfile(root, 'evaluate_policies.m'), 'w'); fwrite(fid, new, 'char'); fclose(fid);
+r = mkrow(st, 'frame draws', 'info', sprintf(['%d + %d x set, the tree''s own C2e draws (D124 point 7), in a copy of ' ...
+    'this code''s evaluate_policies.m in the root; this code draws %d + %d x set'], tree, mine));
+end
+
+function new = draw_copy(src, mine, tree)
+% src with the draw expressions of mine replaced by tree's: the main runs once, lb_flights four times.
+a = {sprintf('ag, opt, %d + %d*si);', mine), sprintf('ag, o0, %d + %d * si);', mine), sprintf('ag, o1, %d + %d * si);', mine)};
+b = {sprintf('ag, opt, %d + %d*si);', tree), sprintf('ag, o0, %d + %d * si);', tree), sprintf('ag, o1, %d + %d * si);', tree)};
+want = [1 2 2];
+new = src;
+for i = 1:3
+    n = numel(strfind(new, a{i}));
+    assert(n == want(i), 'b1r_repro:draws', 'b1r_repro: "%s" found %d times, expected %d', a{i}, n, want(i));
+    new = strrep(new, a{i}, b{i});
+end
 end
 
 function err = render_here(root, tab)
@@ -312,7 +344,7 @@ od = fullfile(out, 'sysfa', 'results'); mkdir(od);
 rd = fullfile(C.sysfa, 'results');
 pools = fullfile(C.tree, 'data', 'policy_pools.mat');
 system_fa_breakdown('run', pools, fullfile(rd, 'policy_evaluation.mat'), fullfile(rd, 'policy_evaluation.txt'), ...
-    fullfile(rd, 'trained_dqn.mat'), od);
+    fullfile(rd, 'trained_dqn.mat'), od, fullfile(rd, 'system_fa_breakdown.mat'));
 for f = {'system_fa_breakdown.txt', 'system_fa_breakdown.mat'}
     rows(end+1) = cmp_files(st, ['results/' f{1}], fullfile(od, f{1}), fullfile(rd, f{1})); %#ok<AGROW>
 end
