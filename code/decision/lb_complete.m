@@ -1,6 +1,6 @@
-function [a, acted] = lb_complete(a, cfg, M, mem, PP)
+function [a, acted] = lb_complete(a, cfg, M, mem, PP, F)
 %LB_COMPLETE  Link-budget completion of the DQN's action (policy_decide.m, PP.lb_complete).
-%   [a, acted] = lb_complete(a, cfg, M, mem, PP)
+%   [a, acted] = lb_complete(a, cfg, M, mem, PP, F)
 %   a     configuration the DQN proposes (1 x NE; its argmax under the shield), cfg the one in use
 %   M, mem   the monitor's reading and memory of this cycle (policy_monitor.m): M.confirmed,
 %         M.drop_alarm, mem.drop_n, mem.lb_dc, mem.since, mem.pend
@@ -24,6 +24,13 @@ function [a, acted] = lb_complete(a, cfg, M, mem, PP)
 %   gives for D_c (the smallest of rate_reduce, power_control and both that covers it, else
 %   the largest); its frequency and space factors are kept, and the result must pass the
 %   shield (policy_mask.m).
+%   F (optional): PP.lb_more parsed (dqn_fix.m); absent or off leaves every action as above. With
+%   its fec token a proposal holding fec_interleave is completed too: the power step joins the
+%   code (power_control+fec_interleave, the frequency and space factors kept), the largest link
+%   budget a configuration with the code has. The code is never dropped: no configuration joins
+%   rate_reduce and the code, and the code answers the bursts the proposal saw (time diversity over
+%   the codeword, Tse & Viswanath 2005, ch. 3). Its step token: dqn_fix.m.
+if nargin < 6 || isempty(F), F = struct('on', false, 'fec', false); end
 C = decision_config();
 A = PP.actions; nA = numel(A); NE = numel(a);
 acted = false(1, NE);
@@ -42,10 +49,17 @@ for i = 1:NE
         continue
     end
     p = strsplit(A{a(i)}, '+');
-    if ismember('fec_interleave', p), continue; end
-    bud.drop_db = dc;
-    b = rule_based_policy('path_loss', false, 0, -Inf, NaN, true, bud);
-    j = find(strcmp(A, strjoin([p(ismember(p, keep)), strsplit(b, '+')], '+')), 1);
+    j = [];
+    if ismember('fec_interleave', p)
+        if ~(F.on && F.fec), continue; end
+        j = find(strcmp(A, strjoin([p(ismember(p, keep)), {'power_control', 'fec_interleave'}], '+')), 1);
+        if isempty(j), continue; end
+    end
+    if isempty(j)
+        bud.drop_db = dc;
+        b = rule_based_policy('path_loss', false, 0, -Inf, NaN, true, bud);
+        j = find(strcmp(A, strjoin([p(ismember(p, keep)), strsplit(b, '+')], '+')), 1);
+    end
     if isempty(j) || j == a(i) || ~allowed(j, i), continue; end
     a(i) = j; acted(i) = true;
 end

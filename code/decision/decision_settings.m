@@ -20,6 +20,7 @@ function PP = decision_settings(PP, S)
 %   monitor     lb_accept (struct, field tau_hi: calibrated lost-branch acceptance, every policy;
 %               policy_monitor.m); empty or absent: off
 %   rule        rule_fix (the layered answers, rule_fix.m; '' or absent: off)
+%   dqn         dqn_harm, dqn_hop (dqn_fix.m), lb_more (lb_complete.m); '' or absent: off
 %   S: any struct with some of these fields (a field absent keeps PP's; an empty drop_db,
 %   maha_thr, alarm_mode, confirm or deg_mode keeps PP's), or data/trained_dqn.mat loaded: its
 %   deployed DQN's settings (dec), else the monitor it saved (confirm, alarm_mode, drop_db,
@@ -28,7 +29,8 @@ if isfield(S, 'dec') && isstruct(S.dec), S = S.dec; end
 keep = {'alarm_mode', 'confirm', 'drop_db', 'maha_thr', 'deg_mode'};
 for f = {'alarm_mode', 'confirm', 'drop_db', 'confirm_sweep', 'maha_thr', 'unk_retain', 'unk_mode', ...
         'rule_mmse_db', 'rule_slot', 'rule_dwell', 'esc_drop', 'rule_nb', 'core_nb', 'deg_mode', 'ber_q', ...
-        'confirm_drop', 's1_gate', 's1_gate_core', 'release_m', 'lb_accept', 'lb_complete', 'rule_fix'}
+        'confirm_drop', 's1_gate', 's1_gate_core', 'release_m', 'lb_accept', 'lb_complete', 'rule_fix', ...
+        'dqn_harm', 'dqn_hop', 'lb_more'}
     if ~isfield(S, f{1}) || (isempty(S.(f{1})) && ismember(f{1}, keep)), continue; end
     PP.(f{1}) = S.(f{1});
 end

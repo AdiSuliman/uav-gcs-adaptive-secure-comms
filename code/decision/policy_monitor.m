@@ -92,6 +92,7 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   adds M.quiet: the cycle carries no alarm, no degradation, no drop alarm, the quiet slot is under
 %   PP.q_thr (default C.q_alarm_db) and no bin of the cycle's idle gap is busy (idle_summary.m occ); the
 %   last 8 cycles' bits are kept for policy_decide.m. The bits are kept by hist_bits, their only writer.
+%   PP.dqn_harm (dqn_fix.m) makes the monitor add M.harm too.
 %   The monitor also keeps the last C.hist observation vectors of policy_state.m,
 %   and the window of the temporal fusion (probabilities, antenna gains, link
 %   features, unknown scores, and obs.idle, the record of each cycle's idle time,
@@ -110,7 +111,8 @@ function [mem, M] = policy_monitor(cmd, varargin)
 %   link-budget completion's reading (lb_complete.m), written by lb_track alone: mem.lb_dc, the
 %   drop of the combined antenna gain against its own held reference [dB] (1 x NE, NaN without
 %   antenna gains), mem.drop_n, the consecutive cycles of a confirmed drop alarm, and the
-%   reference's state (lb_ref, lb_rp, lb_rx, lb_e). Without PP.lb_complete none of it exists.
+%   reference's state (lb_ref, lb_rp, lb_rx, lb_e); with PP.lb_more's step also mem.hq_n. Without
+%   PP.lb_complete none of it exists.
 %   M: ber_avg, plr (NE x 1), ebno_est (as measured), drop (dB, without the configurations'
 %      known gains), drop_alarm, degraded, cls, alarm, confirmed (1 x NE),
 %      probs (NE x classes, fused), te (NE x 9, persistence measurements of the window,
@@ -247,6 +249,7 @@ switch mode
 end
 needHarm = (isfield(PP, 's1_gate') && ~isempty(PP.s1_gate) && PP.s1_gate) || ...
     (isfield(PP, 's1_gate_core') && ~isempty(PP.s1_gate_core) && PP.s1_gate_core) || (isfield(PP, 'lb_accept') && ~isempty(PP.lb_accept));
+needHarm = needHarm || (isfield(PP, 'dqn_harm') && dqn_fix('parse', 'dqn_harm', PP.dqn_harm).on);   % the DQN's lost-branch step
 if needHarm                                                     % evidence that a lost branch harms the link, over the confirmation's cycles
     dqm0 = false(1, numel(M.degraded)); if isfield(M, 'deg_quiet'), dqm0 = M.deg_quiet; end
     mem = hist_bits(mem, 'hm', M.degraded | dqm0 | M.drop_alarm);
@@ -294,7 +297,8 @@ if isfield(PP, 'release_m') && ~isempty(PP.release_m) && PP.release_m   % a cycl
     mem = hist_bits(mem, 'qt', M.quiet);
 end
 if ~isempty(ex) && isfield(PP, 'lb_complete') && ~isempty(PP.lb_complete) && PP.lb_complete   % lb_complete.m's reading
-    mem = lb_track(mem, obs, gw(link), q(:), ex, M);
+    st = isfield(PP, 'lb_more') && dqn_fix('parse', 'lb_more', PP.lb_more).step;
+    mem = lb_track(mem, obs, gw(link), q(:), ex, M, st, arr);
 end
 % Observation of this cycle for the agent's state (policy_state.m), newest first
 o = policy_obs(obs, M, bc, unk);
@@ -302,15 +306,23 @@ if isempty(mem.hist), mem.hist = repmat(o, 1, 1, C.hist); end
 mem.hist = cat(3, o, mem.hist(:, :, 1:end-1));
 end
 
-function mem = lb_track(mem, obs, gw, q, ex, M)
+function mem = lb_track(mem, obs, gw, q, ex, M, st, arr)
 % The link-budget completion's reading (lb_complete.m), with a drop alarm and PP.lb_complete only:
 % the combined channel gain of all antennas (obs.gant, dB; maximum-ratio combining adds the
 % branches' powers, Brennan 1959) less the power step of the configuration the frame was
 % received with, a reference of it held as the drop's is (drop_ref.m, a state of its own, the
 % same excursion and alarm), mem.lb_dc the deficit against it (the median of the last cycles
 % against the reference, as M.drop), and mem.drop_n the consecutive cycles of a confirmed drop
-% alarm. No antenna gains: the deficit stays NaN, the completion never acts.
+% alarm. No antenna gains: the deficit stays NaN, the completion never acts. With st (PP.lb_more's
+% step) also mem.hq_n: the consecutive cycles degraded, with or without RF evidence, from the first
+% frame received with the configuration in use (arr: that frame).
 NE = numel(M.confirmed);
+if nargin >= 7 && st
+    if ~isfield(mem, 'hq_n'), mem.hq_n = zeros(1, NE); end
+    h = M.degraded; if isfield(M, 'deg_quiet'), h = h | M.deg_quiet; end
+    mem.hq_n(arr) = 0;
+    mem.hq_n(h) = mem.hq_n(h) + 1; mem.hq_n(~h) = 0;
+end
 if ~isfield(mem, 'lb_ref')
     mem.lb_ref = nan(NE, size(mem.ref, 2)); mem.lb_rp = nan(NE, size(mem.ref, 2)); mem.lb_rx = false(NE, 1);
     mem.lb_e = nan(NE, size(mem.ebno, 2)); mem.lb_dc = nan(1, NE); mem.drop_n = zeros(1, NE);

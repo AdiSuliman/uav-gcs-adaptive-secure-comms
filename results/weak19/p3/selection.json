@@ -1,0 +1,31 @@
+{
+  "tag": "p3",
+  "tree": "C:\\Users\\Adi Suliman\\uav-gcs-v7-p3",
+  "adopted": {
+    "dqn_hop": "rule"
+  },
+  "adopted_txt": "dqn_hop=rule",
+  "created": "2026-11-19 01:55:28",
+  "fingerprint": {
+    "tree": "c:\\users\\adi suliman\\uav-gcs-v7-p3",
+    "code": "03a2791b0efc6f4413d8f947eac13eca7964baaac1a84a2d080411a5b798ec0e",
+    "inputs": [
+      "d348f61e380674ced4d3f518d1c827f781b55c93f263a73e4fab0ee9cd5f9fea",
+      "5e0b85197ecce6f90e3883d1c28dcc4ca5d40df745b28adef25f695c4877b97b",
+      "bdc8e83046956a31d4d0c35a8da829e90b4200629d1ec8257b02170f024e3171",
+      "8a63ee963adc9aa59203b3afc0838ed606a5b7b2c6e7505b0eb6faa1b7998074",
+      "ea892f07362e408251a479122cb1b0ec42c7bd4e99f3937cb111b44c20c7b6e8",
+      "a090a547431c900bbcb990941e6eb4b74a8e3f2eb557da7094b085fe1ea7fc9c"
+    ],
+    "big": [
+      "15875312495 bytes, 2026-11-12 22:50:36",
+      "393762422 bytes, 2026-11-13 00:42:19",
+      "33406156 bytes, 2026-11-17 22:28:41"
+    ]
+  },
+  "deployed": "dqn",
+  "d124": {
+    "adopted": "keep+st+rate",
+    "file": "C:\\Users\\Adi Suliman\\uav-gcs-adaptive-secure-comms\\worktrees\\rule-fix\\results\\rule_fix\\p3\\selection.json"
+  }
+}
