@@ -102,9 +102,23 @@ r = b1r_repro('compare', 's', 'n', fullfile(d, 'm2.mat'), fullfile(d, 'm1.mat'))
 r = b1r_repro('compare', 's', 'n', fullfile(d, 'm3.mat'), fullfile(d, 'm1.mat')); tc.verifyEqual(r.kind, 'DIFF');
 M4 = struct('v', 1, 'generated', 'a', 'more', 5); save(fullfile(d, 'm4.mat'), '-struct', 'M4');
 r = b1r_repro('compare', 's', 'n', fullfile(d, 'm4.mat'), fullfile(d, 'm1.mat')); tc.verifyEqual(r.kind, 'DIFF-additive');
+% fields: words only, entries kept in order, entries changed
+S1 = struct('d', {{'a 1', 'b 2.5%'}}, 't', 'KPI 5 41.0 [38.0, 44.6]'); save(fullfile(d, 's1.mat'), '-struct', 'S1');
+S2 = struct('d', {{'a 1', 'new 7', 'b 2.5% here'}}, 't', 'KPI 5 reads 41.0 [38.0, 44.6]'); save(fullfile(d, 's2.mat'), '-struct', 'S2');
+r = b1r_repro('compare', 's', 'n', fullfile(d, 's2.mat'), fullfile(d, 's1.mat')); tc.verifyEqual(r.kind, 'DIFF-wording', r.detail);
+S3 = struct('d', {{'a 1', 'new 7', 'b 2.5% here'}}, 't', 'KPI 5 41.0 [38.0, 44.6]'); save(fullfile(d, 's3.mat'), '-struct', 'S3');
+r = b1r_repro('compare', 's', 'n', fullfile(d, 's3.mat'), fullfile(d, 's1.mat')); tc.verifyEqual(r.kind, 'DIFF-additive', r.detail);
+S4 = struct('d', {{'a 1', 'new 7', 'b 2.6%'}}, 't', 'KPI 5 41.0 [38.0, 44.6]'); save(fullfile(d, 's4.mat'), '-struct', 'S4');
+r = b1r_repro('compare', 's', 'n', fullfile(d, 's4.mat'), fullfile(d, 's1.mat')); tc.verifyEqual(r.kind, 'DIFF', 'an entry whose number changed');
+S5 = struct('d', {{'a 1', 'b 2.5%'}}, 't', 'KPI 5 41.0 dB [38.0, 44.6]'); save(fullfile(d, 's5.mat'), '-struct', 'S5');
+r = b1r_repro('compare', 's', 'n', fullfile(d, 's5.mat'), fullfile(d, 's1.mat')); tc.verifyEqual(r.kind, 'DIFF-wording', 'a unit word is a word');
+S6 = struct('d', {{'a 1', 'b 2.5'}}, 't', 'KPI 5 41.0 [38.0, 44.6]'); save(fullfile(d, 's6.mat'), '-struct', 'S6');
+r = b1r_repro('compare', 's', 'n', fullfile(d, 's6.mat'), fullfile(d, 's1.mat')); tc.verifyEqual(r.kind, 'DIFF', 'a dropped percent sign changes the number');
 % images: a rendering is not an exact comparison
 im = uint8(zeros(40, 40, 3)); imwrite(im, fullfile(d, 'i1.png')); im(1, 1, :) = 255; imwrite(im, fullfile(d, 'i2.png'));
 r = b1r_repro('compare', 's', 'n', fullfile(d, 'i2.png'), fullfile(d, 'i1.png')); tc.verifyEqual(r.kind, 'rendering'); tc.verifyTrue(r.ok);
+imwrite(uint8(zeros(40, 50, 3)), fullfile(d, 'i3.png'));
+r = b1r_repro('compare', 's', 'n', fullfile(d, 'i3.png'), fullfile(d, 'i1.png')); tc.verifyEqual(r.kind, 'DIFF-image');
 end
 
 function test_compare_wording(tc)
@@ -120,6 +134,10 @@ tc.verifyEqual(r.kind, 'DIFF', 'a changed number is a difference');
 write(fullfile(d, 'o.txt'), {'Generated: 1', 'own path 7 of 5, 41.3% [38.0, 44.6]', 'F1 kept on rx3'});
 r = b1r_repro('compare', 's', 'n', fullfile(d, 'o.txt'), fullfile(d, 'reg.txt'));
 tc.verifyEqual(r.kind, 'DIFF', 'numbers out of order are a difference');
+write(fullfile(d, 'p.txt'), {'Generated: 1', 'own path 5 of 7, 41.3% [38.0, 44.6] and 5 of 7, 41.3% [38.0, 44.6]'});
+write(fullfile(d, 'preg.txt'), {'Generated: 1', 'sweeper path 5 of 7, 41.3% [38.0, 44.6]', 'other path 5 of 7, 41.3% [38.0, 44.6]'});
+r = b1r_repro('compare', 's', 'n', fullfile(d, 'p.txt'), fullfile(d, 'preg.txt'));
+tc.verifyEqual(r.kind, 'DIFF', 'two registered lines cannot both pair with one line printed here');
 write(fullfile(d, 'x.txt'), {'Generated: 1', 'own path 5 of 7', 'F1 kept on rx3'});
 r = b1r_repro('compare', 's', 'n', fullfile(d, 'x.txt'), fullfile(d, 'reg.txt'));
 tc.verifyEqual(r.kind, 'DIFF', 'a dropped number is a difference');
@@ -173,6 +191,11 @@ V = b1r_repro('lect_values', fullfile(d, 'n2.csv'), m2);
 tc.verifyEqual([V.n_repro V.reworded V.repro_missing], [2 1 1]);
 tc.verifyEqual(V.reworded_at{1}, sprintf('N9 %s:2 -> line 3', src2));
 tc.verifyTrue(startsWith(V.missing{1}, 'N10'));
+% the number inside an interval on an unrelated line is no rewording
+write(fullfile(d, 'rep3.txt'), {'a', 'noise burst held 95.1% [90.6, 97.4]', 'b'});
+m3 = containers.Map('KeyType', 'char', 'ValueType', 'char'); m3(lower(src2)) = fullfile(d, 'rep3.txt');
+V = b1r_repro('lect_values', fullfile(d, 'n2.csv'), m3);
+tc.verifyEqual([V.reworded V.repro_missing], [0 2]);
 end
 
 %% ---------- refusals ----------
@@ -296,8 +319,12 @@ mk = @(stage, kind) struct('stage', stage, 'name', 'n', 'kind', kind, 'ok', isme
 d = fullfile(tc.TestData.tmp, 'sum'); mkdir(d);
 R = b1r_repro('summary', [mk('off', 'exact'), mk('off', 'info')], 'p1', 'x', d);
 tc.verifyEqual(R.rc, 0);
-R = b1r_repro('summary', [mk('off', 'exact'), mk('bw', 'DIFF-additive'), mk('policy_off/render', 'DIFF')], 'p1', 'y', d);
-tc.verifyEqual(R.rc, 1);
+R = b1r_repro('summary', [mk('off', 'exact'), mk('bw', 'DIFF-additive'), mk('policy_off/render', 'DIFF-image')], 'p1', 'y', d);
+tc.verifyEqual(R.rc, 1, 'a renderer image of another size is soft');
+R = b1r_repro('summary', [mk('policy_off/render', 'DIFF')], 'p1', 'u', d);
+tc.verifyEqual(R.rc, 2, 'a changed field of a renderer output is hard');
+R = b1r_repro('summary', [mk('policy_off', 'DIFF-image')], 'p1', 't', d);
+tc.verifyEqual(R.rc, 2, 'an image size outside the renderers is hard');
 R = b1r_repro('summary', [mk('bw', 'DIFF-additive'), mk('off', 'DIFF')], 'p1', 'z', d);
 tc.verifyEqual(R.rc, 2);
 R = b1r_repro('summary', [mk('sysfa', 'DIFF-wording'), mk('lect', 'DIFF-wording')], 'p1', 'v', d);

@@ -182,11 +182,12 @@ end
 end
 
 function R = summary(rows, tag, part, out_dir)
-kinds = {'exact', 'equal-fields', 'equal-lines', 'rendering', 'info', 'DIFF-timing', 'DIFF-additive', 'DIFF-wording', 'DIFF', 'ERROR'};
+kinds = {'exact', 'equal-fields', 'equal-lines', 'rendering', 'info', 'DIFF-timing', 'DIFF-additive', 'DIFF-wording', 'DIFF-image', 'DIFF', 'ERROR'};
 n = cellfun(@(k) sum(strcmp({rows.kind}, k)), kinds);
 bad = ~[rows.ok];
-isr = contains({rows.stage}, 'render');               % the renderers' outputs: this code prints more than the registered code did
-hard = bad & (strcmp({rows.kind}, 'ERROR') | (~isr & ~ismember({rows.kind}, {'DIFF-additive', 'DIFF-wording'})));
+isr = contains({rows.stage}, 'render');               % a renderer's image may change its layout; its numbers are read in the text and fields
+soft = ismember({rows.kind}, {'DIFF-additive', 'DIFF-wording'}) | (isr & strcmp({rows.kind}, 'DIFF-image'));
+hard = bad & ~soft;
 soft = bad & ~hard;
 rc = 2 * any(hard) + double(~any(hard) && any(soft));
 lines = cell(1, numel(rows));
@@ -516,7 +517,8 @@ for i = 1:height(T)
         V.n_repro = V.n_repro + 1;
         R = get_lines(cache, map(k));
         if ln < 1 || ln > numel(L) || ~any(strcmp(R, L{ln}))
-            at = find(arrayfun(@(j) line_has(R, j, nums), 1:numel(R)), 1);
+            cited = ''; if ln >= 1 && ln <= numel(L), cited = L{ln}; end
+            at = reworded_line(R, cited, nums);
             if ~isempty(nums) && ~isempty(at)
                 V.reworded = V.reworded + 1;
                 V.reworded_at{end+1} = sprintf('%s %s:%d -> line %d', char(T.id(i)), f, ln, at);
@@ -526,6 +528,20 @@ for i = 1:height(T)
             end
         end
     end
+end
+end
+
+function at = reworded_line(R, cited, nums)
+% The reproduced line that holds every number of the row as a number (not inside another) and is
+% closest in words to the cited line, at least a quarter of their words shared; [] when none.
+at = [];
+want = regexprep(nums, '^\+', '');
+best = 0.25;
+for j = 1:numel(R)
+    have = regexprep(regexprep(line_numbers(R{j}), '%$', ''), '^\+', '');
+    if ~all(ismember(want, have)), continue; end
+    w = word_overlap(cited, R{j});
+    if w >= best, best = w; at = j; end
 end
 end
 
@@ -610,7 +626,8 @@ rows = new_rows();
 if ~isfolder(ref), rows(end+1) = mkrow(st, [prefix '(folder)'], 'info', sprintf('no registered folder %s', ref)); return; end
 fm = rel_files(mine); fr = rel_files(ref);
 d1 = setdiff(fm, fr); d2 = setdiff(fr, fm);
-rows(end+1) = mkrow(st, [prefix 'files'], ternary(isempty(d1) && isempty(d2), 'info', 'DIFF'), ...
+fk = 'DIFF'; if isempty(d1) && isempty(d2), fk = 'info'; elseif isempty(d2), fk = 'DIFF-additive'; end
+rows(end+1) = mkrow(st, [prefix 'files'], fk, ...
     sprintf('%d files here, %d registered%s%s', numel(fm), numel(fr), list_text('; only here: ', d1), list_text('; only registered: ', d2)));
 for f = reshape(intersect(fm, fr), 1, [])
     rows(end+1) = cmp_files(st, [prefix f{1}], fullfile(mine, f{1}), fullfile(ref, f{1})); %#ok<AGROW>
@@ -645,7 +662,9 @@ switch lower(e)
         if isempty(D), r = mkrow(stage, name, 'equal-fields', 'all fields isequaln; bytes differ (stamps, storage)');
         else
             k = diff_kind(D, '(?i)generated|created|timestamp|elapsed|runtime|wallclock|minutes|duration|datenum|date');
-            if strcmp(k, 'DIFF') && all(cellfun(@(d) contains(d, '(only here)') || contains(d, '#size'), D)), k = 'DIFF-additive'; end
+            add = cellfun(@(d) contains(d, '(only here)') || contains(d, '(registered entries kept in order)'), D);
+            wrd = cellfun(@(d) endsWith(d, ': words only'), D);
+            if strcmp(k, 'DIFF') && all(add | wrd), k = ternary(any(wrd), 'DIFF-wording', 'DIFF-additive'); end
             r = mkrow(stage, name, k, sprintf('%d differing fields: %s', numel(D), strjoin(D(1:min(end, 12)), ' | ')));
         end
     case {'.txt', '.csv', '.md'}
@@ -658,7 +677,7 @@ switch lower(e)
             first_or(k, n + 1), numel(here), quote_list(here), numel(regd), quote_list(regd));
         if isempty(regd) && is_subsequence(Lb, La)
             r = mkrow(stage, name, 'DIFF-additive', ['every registered line is here, in order; ' det]);
-        elseif numbers_kept(regd, here)
+        elseif ~isempty(regd) && numbers_kept(regd, here)
             r = mkrow(stage, name, 'DIFF-wording', ['the registered lines not here differ in words only: each one''s numbers ' ...
                 'occur, in order, on a line printed here; ' det]);
         else
@@ -666,7 +685,7 @@ switch lower(e)
         end
     case '.png'
         ia = imread(mine); ib = imread(ref);
-        if ~isequal(size(ia), size(ib)), r = mkrow(stage, name, 'DIFF', sprintf('image sizes %s vs %s', mat2str(size(ia)), mat2str(size(ib)))); return; end
+        if ~isequal(size(ia), size(ib)), r = mkrow(stage, name, 'DIFF-image', sprintf('image sizes %s vs %s', mat2str(size(ia)), mat2str(size(ib)))); return; end
         npx = nnz(any(ia ~= ib, 3)); sh = npx / (size(ia, 1) * size(ia, 2));
         r = mkrow(stage, name, ternary(sh <= 0.005, 'rendering', 'DIFF'), sprintf('%d pixels differ (%.3f%%, rendering limit 0.5%%)', npx, 100 * sh));
     otherwise
@@ -691,20 +710,40 @@ if isempty(k), v = d; else, v = k(1); end
 end
 
 function tf = numbers_kept(regd, here)
-% Every registered-only line has a line printed here whose numbers hold its numbers in order (here
-% may print more numbers on the line); a line without numbers differs in words only.
+% Each registered-only line is paired with its own line printed here (one each, the closest in words
+% among those whose numbers hold its numbers in order, sign and % included; here may print more
+% numbers). A line without numbers differs in words only.
 nh = cellfun(@line_numbers, here, 'UniformOutput', false);
+used = false(1, numel(here));
 tf = true;
 for i = 1:numel(regd)
     nr = line_numbers(regd{i});
     if isempty(nr), continue; end
-    if ~any(cellfun(@(h) is_subsequence(nr, h), nh)), tf = false; return; end
+    ok = find(~used & cellfun(@(h) is_subsequence(nr, h), nh));
+    if isempty(ok), tf = false; return; end
+    sim = arrayfun(@(j) word_overlap(regd{i}, here{j}), ok);
+    [~, b] = max(sim); used(ok(b)) = true;
 end
 end
 
 function c = line_numbers(s)
-c = regexp(s, '(?<![A-Za-z_\d.])[-+]?\d+(\.\d+)?', 'match');  % F1, rx3, D121: names, not numbers
-c = regexprep(c, '^\+', '');
+c = regexp(s, '(?<![A-Za-z_\d.])[-+]?\d+(\.\d+)?%?', 'match');  % F1, rx3, D121: names, not numbers
+end
+
+function j = word_overlap(a, b)
+wa = unique(lower(regexp(a, '[A-Za-z][A-Za-z_-]*', 'match'))); wb = unique(lower(regexp(b, '[A-Za-z][A-Za-z_-]*', 'match')));
+j = numel(intersect(wa, wb)) / max(1, numel(union(wa, wb)));
+end
+
+function tf = cells_kept(A, B)
+% Every entry of the registered cell B occurs in A in order, word for word or in words only.
+tf = iscellstr(A) && iscellstr(B) && numel(A) >= numel(B);
+if ~tf, return; end
+j = 1;
+for i = 1:numel(A)
+    if j <= numel(B) && (strcmp(A{i}, B{j}) || numbers_kept(B(j), A(i))), j = j + 1; end
+end
+tf = j > numel(B);
 end
 
 function tf = is_subsequence(b, a)
@@ -739,10 +778,15 @@ if isstruct(A) && isstruct(B)
         end
     end
 elseif iscell(A) && iscell(B)
-    if ~isequal(size(A), size(B)), D{end+1} = sprintf('%s#size %s vs %s', p, mat2str(size(A)), mat2str(size(B))); return; end
+    if ~isequal(size(A), size(B))
+        t = ''; if cells_kept(A, B), t = ' (registered entries kept in order)'; end
+        D{end+1} = sprintf('%s#size %s vs %s%s', p, mat2str(size(A)), mat2str(size(B)), t); return
+    end
     for i = 1:numel(A), D = struct_diff(A{i}, B{i}, sprintf('%s{%d}', p, i), D); end
 elseif ischar(A) && ischar(B) && startsWith(strtrim(A), 'Generated:') && startsWith(strtrim(B), 'Generated:')
     return
+elseif ischar(A) && ischar(B) && size(A, 1) <= 1 && size(B, 1) <= 1 && numbers_kept({B}, {A})
+    D{end+1} = sprintf('%s: words only', p);
 elseif (isnumeric(A) || islogical(A)) && (isnumeric(B) || islogical(B)) && isequal(size(A), size(B))
     m = ~(A == B | (isnan(A) & isnan(B)));
     d = double(A(m)) - double(B(m));
