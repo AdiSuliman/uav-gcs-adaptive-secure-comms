@@ -19,7 +19,8 @@ function export_gui_bundle(target, root, adopt)
 %   outside 3e-4 to 6e-3 (console_ref_range.m), because the link monitor would fall back to its
 %   floor and alarm on a clean link, or judge the link on a stale table. The three-state
 %   CNN (data/core_cnn_model.mat, not a reduced chain check) and its report
-%   (results/core_cnn.txt) come along when present. A result of another detector or deployed
+%   (results/core_cnn.txt) come along when present, and so does results/adoption_note.txt of an
+%   adopted checkout (the console's KPI tab names it as the source of the KPI numbers). A result of another detector or deployed
 %   policy, or older than its inputs (result_status.m), is not exported, and a KPI summary
 %   older than the evaluation or the latency it reads neither; an optional file not exported
 %   is removed from the bundle as well: the console shows no stale number. The checkout at
@@ -72,6 +73,8 @@ for f = opt
     if isfile(out), delete(out); end                     % no older copy stays in the bundle
     if ismember(f{1}, bad), stale{end+1} = f{1}; else, miss{end+1} = f{1}; end %#ok<AGROW>
 end
+nt = fullfile(root, 'results', 'adoption_note.txt'); nto = fullfile(dst, 'results', 'adoption_note.txt');
+if isfile(nt), copyfile(nt, nto); elseif isfile(nto), delete(nto); end      % the reading the KPI tab states
 fid = fopen(fullfile(dst, 'profile.json'), 'w');
 if isempty(fieldnames(ad))
     fprintf(fid, '{"profile":"%d UAV antennas","n_rx":%d}\n', n, n);
