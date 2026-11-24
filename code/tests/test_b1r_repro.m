@@ -114,6 +114,13 @@ S5 = struct('d', {{'a 1', 'b 2.5%'}}, 't', 'KPI 5 41.0 dB [38.0, 44.6]'); save(f
 r = b1r_repro('compare', 's', 'n', fullfile(d, 's5.mat'), fullfile(d, 's1.mat')); tc.verifyEqual(r.kind, 'DIFF-wording', 'a unit word is a word');
 S6 = struct('d', {{'a 1', 'b 2.5'}}, 't', 'KPI 5 41.0 [38.0, 44.6]'); save(fullfile(d, 's6.mat'), '-struct', 'S6');
 r = b1r_repro('compare', 's', 'n', fullfile(d, 's6.mat'), fullfile(d, 's1.mat')); tc.verifyEqual(r.kind, 'DIFF', 'a dropped percent sign changes the number');
+% a top-level field the caller compares itself is set aside and named
+J1 = struct('v', 1, 'stale', []); J2 = struct('v', 1, 'stale', struct('file', 'results/edge_map.mat'));
+fid = fopen(fullfile(d, 'j1.json'), 'w'); fwrite(fid, jsonencode(J1)); fclose(fid);
+fid = fopen(fullfile(d, 'j2.json'), 'w'); fwrite(fid, jsonencode(J2)); fclose(fid);
+r = b1r_repro('compare', 's', 'n', fullfile(d, 'j2.json'), fullfile(d, 'j1.json')); tc.verifyEqual(r.kind, 'DIFF');
+r = b1r_repro('compare', 's', 'n', fullfile(d, 'j2.json'), fullfile(d, 'j1.json'), {'stale'});
+tc.verifyEqual(r.kind, 'equal-fields'); tc.verifyTrue(contains(r.detail, 'x.stale set aside'));
 % images: a rendering is not an exact comparison
 im = uint8(zeros(40, 40, 3)); imwrite(im, fullfile(d, 'i1.png')); im(1, 1, :) = 255; imwrite(im, fullfile(d, 'i2.png'));
 r = b1r_repro('compare', 's', 'n', fullfile(d, 'i2.png'), fullfile(d, 'i1.png')); tc.verifyEqual(r.kind, 'rendering'); tc.verifyTrue(r.ok);
@@ -196,6 +203,15 @@ write(fullfile(d, 'rep3.txt'), {'a', 'noise burst held 95.1% [90.6, 97.4]', 'b'}
 m3 = containers.Map('KeyType', 'char', 'ValueType', 'char'); m3(lower(src2)) = fullfile(d, 'rep3.txt');
 V = b1r_repro('lect_values', fullfile(d, 'n2.csv'), m3);
 tc.verifyEqual([V.reworded V.repro_missing], [0 2]);
+% a composite value: its numbers, on the line whose own numbers match the cited line's
+write(fullfile(d, 'src4.txt'), {'edge, delay 1: single 0 COMMITTED / 300 NOT COMMITTED / 0 UNDETERMINED'});
+write(fullfile(d, 'rep4.txt'), {'[STALE] edge, delay 7: single 0 COMMITTED / 300 NOT COMMITTED / 0 UNDETERMINED', ...
+    '[STALE] edge, delay 1: single 0 COMMITTED / 300 NOT COMMITTED / 0 UNDETERMINED', '[STALE] edge, delay 2: single 0 COMMITTED / 300 NOT COMMITTED / 0 UNDETERMINED'});
+src4 = strrep(fullfile(d, 'src4.txt'), '\', '/');
+write(fullfile(d, 'n4.csv'), {'id,value,ci_lo,ci_hi,source_file,source_line', sprintf('N12,0 COMMITTED / 300 NOT COMMITTED / 0 UNDETERMINED,,,%s,1', src4)});
+m4 = containers.Map('KeyType', 'char', 'ValueType', 'char'); m4(lower(src4)) = fullfile(d, 'rep4.txt');
+V = b1r_repro('lect_values', fullfile(d, 'n4.csv'), m4);
+tc.verifyEqual(V.reworded_at, {sprintf('N12 %s:1 -> line 2', src4)});
 end
 
 %% ---------- refusals ----------

@@ -266,6 +266,21 @@ if strcmp(mode, 'off'), bref = C.bundle_ref; else, bref = fullfile(C.ad_root, 'o
 rows = [rows, render_and_compare(C, st, root, ref, bref, LO, render_fn)];
 end
 
+function c = carried_stale(root)
+% The files result_status marks stale in this root only because the policy_evaluation.mat written here
+% is newer than the tree's copy of them (edge_map.mat: B1-R does not re-run EDGE).
+c = {};
+f = fullfile(root, 'results', 'report_numbers.json');
+if ~isfile(f), return; end
+J = jsondecode(fileread(f));
+if ~isfield(J, 'stale') || isempty(J.stale), return; end
+S = J.stale; if iscell(S), S = [S{:}]; end
+for k = 1:numel(S)
+    if ~(isfield(S(k), 'why') && strcmp(S(k).why, 'older than results/policy_evaluation.mat')), c = {}; return; end
+    c{end+1} = S(k).file; %#ok<AGROW>
+end
+end
+
 function tf = reused(O)
 tf = isfield(O, 'reuse') && isequal(O.reuse, true);
 end
@@ -321,8 +336,15 @@ else
     rows(end+1) = mkrow(st, 'renderers', ternary(isempty(err), 'info', 'ERROR'), ternary(isempty(err), 'KPI, DASH, RPT, TABLE, BUNDLE ran', strjoin(err, '; ')));
 end
 outs = [LO.final, ternary(tab, LO.table, {})];
+carried = carried_stale(root);
+if ~isempty(carried)
+    rows(end+1) = mkrow(st, 'carried, not reproduced', 'info', sprintf(['%s: the tree''s files copied into the root, older than the ' ...
+        'policy_evaluation.mat written here; their lines print [STALE ...] and report_numbers.json lists them as stale. ' ...
+        'That list is set aside below; the carried numbers themselves are the registered ones'], strjoin(carried, ', ')));
+end
 for f = outs
-    rows(end+1) = cmp_files(st, ['results/' f{1}], fullfile(root, 'results', f{1}), fullfile(ref, f{1})); %#ok<AGROW>
+    aside = {}; if strcmp(f{1}, 'report_numbers.json') && ~isempty(carried), aside = {'stale'}; end
+    rows(end+1) = cmp_files(st, ['results/' f{1}], fullfile(root, 'results', f{1}), fullfile(ref, f{1}), aside); %#ok<AGROW>
 end
 S = load(fullfile(root, 'params.mat'));
 rx = sprintf('rx%d', S.params.n_rx);
@@ -535,13 +557,21 @@ function at = reworded_line(R, cited, nums)
 % The reproduced line that holds every number of the row as a number (not inside another) and is
 % closest in words to the cited line, at least a quarter of their words shared; [] when none.
 at = [];
-want = regexprep(nums, '^\+', '');
-best = 0.25;
+want = {};
+for i = 1:numel(nums)
+    t = line_numbers(nums{i}); if isempty(t), t = nums(i); end
+    want = [want, t]; %#ok<AGROW>
+end
+want = regexprep(regexprep(want, '%$', ''), '^\+', '');
+mine = line_numbers(cited);
+best = -Inf;
 for j = 1:numel(R)
-    have = regexprep(regexprep(line_numbers(R{j}), '%$', ''), '^\+', '');
-    if ~all(ismember(want, have)), continue; end
+    have = line_numbers(R{j});
+    if ~all(ismember(want, regexprep(regexprep(have, '%$', ''), '^\+', ''))), continue; end
     w = word_overlap(cited, R{j});
-    if w >= best, best = w; at = j; end
+    if w < 0.25, continue; end
+    w = w + is_subsequence(mine, have);    % the cited line's own numbers, in order, on the line
+    if w > best, best = w; at = j; end
 end
 end
 
@@ -644,7 +674,9 @@ F = sort(F);
 end
 
 %% ===================== Comparison =====================
-function r = cmp_files(stage, name, mine, ref)
+function r = cmp_files(stage, name, mine, ref, aside)
+% aside: top-level fields of a .json or .mat compared by the caller, named in the detail.
+if nargin < 5, aside = {}; end
 if ~isfile(mine)
     if isfile(ref), r = mkrow(stage, name, 'DIFF', 'not produced here');
     else, r = mkrow(stage, name, 'info', 'neither produced here nor registered'); end
@@ -658,11 +690,15 @@ end
 switch lower(e)
     case {'.mat', '.json'}
         if strcmpi(e, '.mat'), A = load(mine); B = load(ref); else, A = jsondecode(fileread(mine)); B = jsondecode(fileread(ref)); end
+        set = aside(isfield(A, aside) | isfield(B, aside));
+        for a = set, if isfield(A, a{1}), A = rmfield(A, a{1}); end, if isfield(B, a{1}), B = rmfield(B, a{1}); end, end
         D = struct_diff(A, B);
+        if ~isempty(set), D{end+1} = sprintf('x.%s set aside (see the row above)', strjoin(set, ', x.')); end
         if isempty(D), r = mkrow(stage, name, 'equal-fields', 'all fields isequaln; bytes differ (stamps, storage)');
+        elseif all(cellfun(@(d) endsWith(d, 'set aside (see the row above)'), D)), r = mkrow(stage, name, 'equal-fields', ['all other fields isequaln; ' D{end}]);
         else
             k = diff_kind(D, '(?i)generated|created|timestamp|elapsed|runtime|wallclock|minutes|duration|datenum|date');
-            add = cellfun(@(d) contains(d, '(only here)') || contains(d, '(registered entries kept in order)'), D);
+            add = cellfun(@(d) contains(d, '(only here)') || contains(d, '(registered entries kept in order)') || endsWith(d, 'set aside (see the row above)'), D);
             wrd = cellfun(@(d) endsWith(d, ': words only'), D);
             if strcmp(k, 'DIFF') && all(add | wrd), k = ternary(any(wrd), 'DIFF-wording', 'DIFF-additive'); end
             r = mkrow(stage, name, k, sprintf('%d differing fields: %s', numel(D), strjoin(D(1:min(end, 12)), ' | ')));
