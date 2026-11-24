@@ -107,6 +107,47 @@ im = uint8(zeros(40, 40, 3)); imwrite(im, fullfile(d, 'i1.png')); im(1, 1, :) = 
 r = b1r_repro('compare', 's', 'n', fullfile(d, 'i2.png'), fullfile(d, 'i1.png')); tc.verifyEqual(r.kind, 'rendering'); tc.verifyTrue(r.ok);
 end
 
+function test_compare_wording(tc)
+% Words changed, every registered number kept in order on a line printed here: DIFF-wording, reported.
+d = fullfile(tc.TestData.tmp, 'cmpw'); mkdir(d);
+write(fullfile(d, 'reg.txt'), {'Generated: 1', 'sweeper path 5 of 7, 41.3% [38.0, 44.6]', 'F1 kept on rx3'});
+write(fullfile(d, 'w.txt'), {'Generated: 1', 'own path 5 of 7, 41.3% [38.0, 44.6] (95% interval)', 'F1 kept on rx3 here', 'onset 2'});
+r = b1r_repro('compare', 's', 'n', fullfile(d, 'w.txt'), fullfile(d, 'reg.txt'));
+tc.verifyEqual(r.kind, 'DIFF-wording', r.detail); tc.verifyFalse(r.ok);
+write(fullfile(d, 'v.txt'), {'Generated: 1', 'own path 5 of 7, 41.4% [38.0, 44.6]', 'F1 kept on rx3'});
+r = b1r_repro('compare', 's', 'n', fullfile(d, 'v.txt'), fullfile(d, 'reg.txt'));
+tc.verifyEqual(r.kind, 'DIFF', 'a changed number is a difference');
+write(fullfile(d, 'o.txt'), {'Generated: 1', 'own path 7 of 5, 41.3% [38.0, 44.6]', 'F1 kept on rx3'});
+r = b1r_repro('compare', 's', 'n', fullfile(d, 'o.txt'), fullfile(d, 'reg.txt'));
+tc.verifyEqual(r.kind, 'DIFF', 'numbers out of order are a difference');
+write(fullfile(d, 'x.txt'), {'Generated: 1', 'own path 5 of 7', 'F1 kept on rx3'});
+r = b1r_repro('compare', 's', 'n', fullfile(d, 'x.txt'), fullfile(d, 'reg.txt'));
+tc.verifyEqual(r.kind, 'DIFF', 'a dropped number is a difference');
+end
+
+function test_set_aside_and_lat_age(tc)
+% The guard reads the registered KP fields: those this code adds (on neither file) are set aside.
+d = fullfile(tc.TestData.tmp, 'aside'); mkdir(d);
+KP = struct('a', 1, 'b', 2); save(fullfile(d, 'adopted.mat'), 'KP');
+N = struct('KP', struct('a', 1, 'b', 2, 'monitor_note', 'x', 'speed_ne', 3), 'RES', 1);
+E = struct('KP', struct('a', 1, 'b', 2));
+R = b1r_repro('set_aside', N, E, fullfile(d, 'adopted.mat'));
+tc.verifyEqual(sort(R.add), {'monitor_note', 'speed_ne'});
+tc.verifyEqual(R.N.KP, E.KP); tc.verifyEqual(R.N.RES, 1);
+KP = struct('a', 1, 'b', 2, 'speed_ne', 3); save(fullfile(d, 'adopted2.mat'), 'KP');
+R = b1r_repro('set_aside', N, E, fullfile(d, 'adopted2.mat'));
+tc.verifyEqual(R.add, {'monitor_note'}, 'a field the adopted file holds stays for the guard');
+R = b1r_repro('set_aside', E, E, fullfile(d, 'adopted.mat'));
+tc.verifyEmpty(R.add);
+% timing reference: an older adopted latency.mat is named
+write(fullfile(d, 'old.mat'), {'x'}); write(fullfile(d, 'new.mat'), {'y'});
+o = java.io.File(fullfile(d, 'old.mat')); o.setLastModified(o.lastModified() - 86400000);
+r = b1r_repro('lat_age', 'policy_on', fullfile(d, 'old.mat'), fullfile(d, 'new.mat'));
+tc.verifyTrue(r.ok); tc.verifyTrue(contains(r.detail, 'is older than the tree''s'), r.detail);
+r = b1r_repro('lat_age', 'policy_on', fullfile(d, 'new.mat'), fullfile(d, 'old.mat'));
+tc.verifyTrue(contains(r.detail, 'is not older'), r.detail);
+end
+
 %% ---------- lecturer numbers ----------
 function test_lect_values(tc)
 d = fullfile(tc.TestData.tmp, 'lect'); mkdir(d);
@@ -121,6 +162,17 @@ m = containers.Map('KeyType', 'char', 'ValueType', 'char'); m(lower(src)) = full
 V = b1r_repro('lect_values', fullfile(d, 'n.csv'), m);
 tc.verifyEqual([V.n_repro V.repro_missing], [3 1], 'the cited line is looked for anywhere in the reproduced file: only the changed one (N2) is missing');
 tc.verifyTrue(startsWith(V.missing{1}, 'N2'));
+tc.verifyEqual(V.reworded, 0);
+% a cited line reworded in the reproduced file: its numbers on one line there
+write(fullfile(d, 'src2.txt'), {'a', 'never trained: DQN + escalation 90.6% (rule 44.1%)'});
+write(fullfile(d, 'rep2.txt'), {'a', 'b', 'never trained, deployed, no escalation: 92.2% weighted, 90.6% averaged; rule 52.2% / 44.1%'});
+src2 = strrep(fullfile(d, 'src2.txt'), '\', '/');
+write(fullfile(d, 'n2.csv'), {'id,value,ci_lo,ci_hi,source_file,source_line', sprintf('N9,90.6,,,%s,2', src2), sprintf('N10,47.0,,,%s,2', src2)});
+m2 = containers.Map('KeyType', 'char', 'ValueType', 'char'); m2(lower(src2)) = fullfile(d, 'rep2.txt');
+V = b1r_repro('lect_values', fullfile(d, 'n2.csv'), m2);
+tc.verifyEqual([V.n_repro V.reworded V.repro_missing], [2 1 1]);
+tc.verifyEqual(V.reworded_at{1}, sprintf('N9 %s:2 -> line 3', src2));
+tc.verifyTrue(startsWith(V.missing{1}, 'N10'));
 end
 
 %% ---------- refusals ----------
@@ -156,6 +208,15 @@ rows = b1r_repro('policy', C, 'off', out2, O);
 k = {rows.kind}; n = {rows.name};
 tc.verifyEqual(k{strcmp(n, 'results/policy_evaluation.mat')}, 'DIFF');
 tc.verifyEqual(k{strcmp(n, 'results/policy_evaluation.txt')}, 'DIFF');
+% compared again on the outputs already there: nothing is built, evaluated or rendered
+O3 = struct('reuse', true, 'eval_fn', @(root, cfg) error('t:ran', 'evaluated'), 'render_fn', @(root, tab) error('t:ran', 'rendered'));
+rows = b1r_repro('policy', C, 'off', out2, O3);
+k3 = {rows.kind}; n3 = {rows.name};
+tc.verifyEqual(k3{strcmp(n3, 'results/policy_evaluation.mat')}, 'DIFF');
+tc.verifyEqual(k3{strcmp(n3, 'results/kpi_summary.txt')}, 'equal-lines');
+tc.verifyTrue(any(strcmp(n3, 'reused')));
+tc.verifyTrue(startsWith(rows(strcmp(n3, 'renderers')).detail, 'not run'));
+tc.verifyFalse(any(strcmp(n3, 'evaluate_policies')));
 end
 
 function test_tree_draws(tc)
@@ -230,7 +291,7 @@ end
 
 %% ---------- the return code ----------
 function test_summary_return_code(tc)
-% 0 all ok; 1 only additive or renderer-output differences; 2 any other difference or an error.
+% 0 all ok; 1 only additive, wording or renderer-output differences; 2 any other difference or an error.
 mk = @(stage, kind) struct('stage', stage, 'name', 'n', 'kind', kind, 'ok', ismember(kind, {'exact', 'equal-lines', 'info'}), 'detail', '');
 d = fullfile(tc.TestData.tmp, 'sum'); mkdir(d);
 R = b1r_repro('summary', [mk('off', 'exact'), mk('off', 'info')], 'p1', 'x', d);
@@ -239,6 +300,8 @@ R = b1r_repro('summary', [mk('off', 'exact'), mk('bw', 'DIFF-additive'), mk('pol
 tc.verifyEqual(R.rc, 1);
 R = b1r_repro('summary', [mk('bw', 'DIFF-additive'), mk('off', 'DIFF')], 'p1', 'z', d);
 tc.verifyEqual(R.rc, 2);
+R = b1r_repro('summary', [mk('sysfa', 'DIFF-wording'), mk('lect', 'DIFF-wording')], 'p1', 'v', d);
+tc.verifyEqual(R.rc, 1, 'wording alone is reported, not a real difference');
 R = b1r_repro('summary', [mk('render', 'ERROR')], 'p1', 'w', d);
 tc.verifyEqual(R.rc, 2, 'an error is hard even in a renderer stage');
 tc.verifyTrue(isfile(fullfile(d, 'b1r_p1_z_summary.txt')));

@@ -24,7 +24,12 @@ function R = b1r_repro(cmd, varargin)
 %       (text equal, 'Generated:' lines aside), rendering (an image within 0.5% of its pixels;
 %       not an exact comparison), info (nothing registered to compare), DIFF-timing (only
 %       time-like fields or lines differ), DIFF-additive (every registered line or field is
-%       reproduced, this code prints or holds more), DIFF, ERROR.
+%       reproduced, this code prints or holds more), DIFF-wording (text whose registered lines
+%       differ only in words: each such line's numbers occur, in order, on a line printed here;
+%       reported, read by a person), DIFF, ERROR.
+%   Compare again: R = b1r_repro('recompare', tag, src_dir, out_dir [, O]) reads the outputs a
+%   'run' left in src_dir (its light and heavy folders) with this code's comparisons, runs nothing
+%   and writes b1r_<tag>_<part>-recompare_summary.txt into out_dir (a new folder).
 %   One stage alone: R = b1r_repro('stage', name, tag, out_dir [, O]) with name bw, sysfa, render, off, on or lect
 %   (out_dir must not exist for the first stage of a folder; the stage's own folder inside must not exist).
 %   Helpers: b1r_repro('compare', stage, name, mine, ref), b1r_repro('diff', A, B),
@@ -33,6 +38,9 @@ function R = b1r_repro(cmd, varargin)
 %   Test hooks in O: eval_fn(root, cfg), render_fn(root, tab), keep_functions.
 switch cmd
     case 'run',         R = run_parts(varargin{:});
+    case 'recompare',   R = recompare(varargin{:});
+    case 'set_aside',   [N, add] = set_aside_added(varargin{:}); R = struct('N', N, 'add', {add});
+    case 'lat_age',     R = lat_age(varargin{:});
     case 'config',      R = config(varargin{:});
     case 'build_root',  build_root(varargin{:}); R = [];
     case 'compare',     R = cmp_files(varargin{:});
@@ -138,17 +146,52 @@ rows = [rows, r];
 R = summary(rows, tag, part, out_dir);
 end
 
+function R = recompare(tag, src, out_dir, O)
+% The comparisons of a finished run read again on its outputs: nothing is built, evaluated or rendered.
+if nargin < 4 || isempty(O), O = struct(); end
+C = config(tag, O); O.reuse = true;
+src = char(src); out_dir = char(out_dir);
+assert(isfolder(src), 'b1r_repro:src', 'b1r_repro: %s is no folder', src);
+assert(~isfolder(out_dir), 'b1r_repro:exists', 'b1r_repro: %s exists', out_dir);
+mkdir(out_dir);
+stages = {'light', 'p1', {'bw', 'sysfa'}; 'light', 'p3', {'sysfa'}; 'heavy', 'p1', {'render', 'off', 'on', 'lect'}; 'heavy', 'p3', {'render', 'off', 'on'}};
+R = struct('part', {}, 'rc', {}, 'summary', {});
+for part = {'light', 'heavy'}
+    d = fullfile(src, part{1});
+    if ~isfolder(d), continue; end
+    names = stages{strcmp(stages(:, 1), part{1}) & strcmp(stages(:, 2), tag), 3};
+    rows = new_rows();
+    for k = 1:numel(names)
+        try
+            switch names{k}
+                case 'bw',     r = stage_bw(C, d, O);
+                case 'sysfa',  r = stage_sysfa(C, d, O);
+                case 'render', r = stage_render(C, d, O);
+                case 'off',    r = stage_policy(C, 'off', d, O);
+                case 'on',     r = stage_policy(C, 'on', d, O);
+                case 'lect',   r = stage_lect(C, d);
+            end
+        catch e
+            r = mkrow(names{k}, 'stage', 'ERROR', sprintf('%s: %s', e.identifier, e.message));
+        end
+        rows = [rows, r]; %#ok<AGROW>
+    end
+    S = summary(rows, tag, [part{1} '-recompare'], out_dir);
+    R(end+1) = struct('part', part{1}, 'rc', S.rc, 'summary', S.summary); %#ok<AGROW>
+end
+end
+
 function R = summary(rows, tag, part, out_dir)
-kinds = {'exact', 'equal-fields', 'equal-lines', 'rendering', 'info', 'DIFF-timing', 'DIFF-additive', 'DIFF', 'ERROR'};
+kinds = {'exact', 'equal-fields', 'equal-lines', 'rendering', 'info', 'DIFF-timing', 'DIFF-additive', 'DIFF-wording', 'DIFF', 'ERROR'};
 n = cellfun(@(k) sum(strcmp({rows.kind}, k)), kinds);
 bad = ~[rows.ok];
 isr = contains({rows.stage}, 'render');               % the renderers' outputs: this code prints more than the registered code did
-hard = bad & (strcmp({rows.kind}, 'ERROR') | (~isr & ~strcmp({rows.kind}, 'DIFF-additive')));
+hard = bad & (strcmp({rows.kind}, 'ERROR') | (~isr & ~ismember({rows.kind}, {'DIFF-additive', 'DIFF-wording'})));
 soft = bad & ~hard;
 rc = 2 * any(hard) + double(~any(hard) && any(soft));
 lines = cell(1, numel(rows));
 for i = 1:numel(rows), lines{i} = row_text(rows(i)); end
-head = {sprintf('B1R %s %s summary, %s; rc 0 all comparisons ok, 1 only additive or renderer-output differences, 2 a real difference or an error', ...
+head = {sprintf('B1R %s %s summary, %s; rc 0 all comparisons ok, 1 only additive, wording or renderer-output differences, 2 a real difference or an error', ...
     upper(tag), part, datestr(now)), ...
     strjoin(cellfun(@(k, c) sprintf('%s %d', k, c), kinds, num2cell(n), 'UniformOutput', false), ' | ')};
 f = fullfile(out_dir, sprintf('b1r_%s_%s_summary.txt', tag, part));
@@ -181,16 +224,21 @@ if nargin < 4 || isempty(O), O = struct(); end
 st = ['policy_' mode]; rows = new_rows();
 root = fullfile(out, mode);
 LO = left_out(mode);
-build_root(root, C.tree, LO.rel);
-cfg = [];
-if strcmp(mode, 'on'), cfg = adopt_reading('cfg', jsondecode(fileread(fullfile(C.ad_root, 'adoption.json')))); end
-rows(end+1) = tree_draws(C, root, st);
-eval_fn = hook(O, 'eval_fn', @run_eval);
 render_fn = hook(O, 'render_fn', @render_here);
-t0 = tic;
-eval_fn(root, cfg);
-how = ', no adoption'; if ~isempty(cfg), how = [', CFG.adopt rule_fix ' cfg.adopt.rule_fix]; end
-rows(end+1) = mkrow(st, 'evaluate_policies', 'info', sprintf('ran %.1f min, %d threads%s', toc(t0) / 60, maxNumCompThreads, how));
+if reused(O)
+    render_fn = [];
+    rows(end+1) = mkrow(st, 'reused', 'info', sprintf('the outputs in %s compared again; nothing run', root));
+else
+    build_root(root, C.tree, LO.rel);
+    cfg = [];
+    if strcmp(mode, 'on'), cfg = adopt_reading('cfg', jsondecode(fileread(fullfile(C.ad_root, 'adoption.json')))); end
+    rows(end+1) = tree_draws(C, root, st);
+    eval_fn = hook(O, 'eval_fn', @run_eval);
+    t0 = tic;
+    eval_fn(root, cfg);
+    how = ', no adoption'; if ~isempty(cfg), how = [', CFG.adopt rule_fix ' cfg.adopt.rule_fix]; end
+    rows(end+1) = mkrow(st, 'evaluate_policies', 'info', sprintf('ran %.1f min, %d threads%s', toc(t0) / 60, maxNumCompThreads, how));
+end
 if strcmp(mode, 'off'), ref = fullfile(C.tree, 'results'); else, ref = fullfile(C.ad_root, 'on', 'results'); end
 for f = LO.c2e
     rows(end+1) = cmp_files(st, ['results/' f{1}], fullfile(root, 'results', f{1}), fullfile(ref, f{1})); %#ok<AGROW>
@@ -199,7 +247,10 @@ if strcmp(mode, 'on')
     N = load(fullfile(root, 'results', 'policy_evaluation.mat'));
     E = load(fullfile(C.tree, 'results', 'policy_evaluation.mat'));
     T = load(fullfile(C.rf, 'test.mat'));
-    strict = isfile(fullfile(C.repo, 'code', 'decision', 'rule_fix_reading.m')) && ...
+    [N, add] = set_aside_added(N, E, fullfile(ref, 'policy_evaluation.mat'));
+    rows(end+1) = mkrow(st, 'guard input', 'info', ternary(isempty(add), 'KP as written here', ...
+        sprintf('KP fields this code adds (on neither the registered nor the adopted file) set aside before the guard: %s', strjoin(add, ', '))));
+    strict =isfile(fullfile(C.repo, 'code', 'decision', 'rule_fix_reading.m')) && ...
         strcmp(strrep(fileread(fullfile(C.repo, 'code', 'evaluation', 'lect_kpis.m')), char(13), ''), ...
         strrep(fileread(fullfile(C.tree, 'code', 'evaluation', 'lect_kpis.m')), char(13), ''));
     G = adopt_reading('guard_c2e', N, E, T, struct('lect_strict', strict));
@@ -208,9 +259,42 @@ if strcmp(mode, 'on')
     end
     rows(end+1) = mkrow(st, 'guard C2e', ternary(G.pass, 'info', 'DIFF'), sprintf('adopt_reading guard_c2e, lect_strict %d', strict));
     clear N E T
+    rows(end+1) = lat_age(st, fullfile(ref, 'latency.mat'), fullfile(C.tree, 'results', 'latency.mat'));
 end
 if strcmp(mode, 'off'), bref = C.bundle_ref; else, bref = fullfile(C.ad_root, 'on', 'profiles'); end
 rows = [rows, render_and_compare(C, st, root, ref, bref, LO, render_fn)];
+end
+
+function tf = reused(O)
+tf = isfield(O, 'reuse') && isequal(O.reuse, true);
+end
+
+function [N, add] = set_aside_added(N, E, adopted)
+% N's KP without the fields neither the registered KP nor the adopted file's KP holds: this code
+% writes them (descriptive readings), the guard compares the registered fields.
+add = {};
+if ~isfield(N, 'KP') || ~isfield(E, 'KP'), return; end
+have = fieldnames(E.KP);
+if isfile(adopted)
+    A = load(adopted, 'KP');
+    if isfield(A, 'KP'), have = union(have, fieldnames(A.KP)); end
+end
+add = setdiff(fieldnames(N.KP), have)';
+if ~isempty(add), N.KP = rmfield(N.KP, add); end
+end
+
+function r = lat_age(st, ref_lat, tree_lat)
+% The adopted render's timing against the tree's: KPI 7 and the latency rows of the render below are
+% read against the reference's latency.mat.
+if ~isfile(ref_lat) || ~isfile(tree_lat), r = mkrow(st, 'render reference timing', 'info', 'no latency.mat on one side'); return; end
+a = dir(ref_lat); b = dir(tree_lat);
+if a.datenum < b.datenum
+    t = sprintf(['the adopted render''s latency.mat (%s) is older than the tree''s (%s): KPI 7 and the latency rows ' ...
+        'below are read against the older timing; the tree''s is the later LAT'], datestr(a.datenum, 'yyyy-mm-dd HH:MM'), datestr(b.datenum, 'yyyy-mm-dd HH:MM'));
+else
+    t = sprintf('the adopted render''s latency.mat (%s) is not older than the tree''s (%s)', datestr(a.datenum, 'yyyy-mm-dd HH:MM'), datestr(b.datenum, 'yyyy-mm-dd HH:MM'));
+end
+r = mkrow(st, 'render reference timing', 'info', t);
 end
 
 function rows = stage_render(C, out, O)
@@ -220,16 +304,21 @@ if nargin < 3, O = struct(); end
 root = fullfile(out, 'render');
 LO = left_out('off');
 LO.rel = strcat('results/', [LO.final, LO.table]);
-build_root(root, C.tree, LO.rel);
-rows = render_and_compare(C, 'render', root, fullfile(C.tree, 'results'), C.bundle_ref, LO, hook(O, 'render_fn', @render_here));
+fn = [];
+if ~reused(O), build_root(root, C.tree, LO.rel); fn = hook(O, 'render_fn', @render_here); end
+rows = render_and_compare(C, 'render', root, fullfile(C.tree, 'results'), C.bundle_ref, LO, fn);
 end
 
 function rows = render_and_compare(C, st, root, ref, bref, LO, render_fn)
 rows = new_rows();
 if ~strcmp(st, 'render'), st = [st '/render']; end
 tab = isfile(fullfile(C.repo, 'code', 'evaluation', 'lect_kpi_table.m'));
-err = render_fn(root, tab);
-rows(end+1) = mkrow(st, 'renderers', ternary(isempty(err), 'info', 'ERROR'), ternary(isempty(err), 'KPI, DASH, RPT, TABLE, BUNDLE ran', strjoin(err, '; ')));
+if isempty(render_fn)
+    rows(end+1) = mkrow(st, 'renderers', 'info', sprintf('not run; the outputs in %s compared again', root));
+else
+    err = render_fn(root, tab);
+    rows(end+1) = mkrow(st, 'renderers', ternary(isempty(err), 'info', 'ERROR'), ternary(isempty(err), 'KPI, DASH, RPT, TABLE, BUNDLE ran', strjoin(err, '; ')));
+end
 outs = [LO.final, ternary(tab, LO.table, {})];
 for f = outs
     rows(end+1) = cmp_files(st, ['results/' f{1}], fullfile(root, 'results', f{1}), fullfile(ref, f{1})); %#ok<AGROW>
@@ -307,10 +396,15 @@ run(name);
 end
 
 %% ===================== Stage: CORE_BW report =====================
-function rows = stage_bw(C, out)
+function rows = stage_bw(C, out, O)
 st = 'bw'; rows = new_rows();
 root = fullfile(out, 'bw');
 src = fullfile(C.bw, 'results', 'core_bw');
+if nargin > 2 && reused(O)
+    rows(end+1) = mkrow(st, 'reused', 'info', sprintf('the outputs in %s compared again; nothing run', root));
+    rows = [rows, cmp_bw(st, root, src)];
+    return
+end
 for f = {'protocol.json', 'recoverable.txt', 'validation.mat', 'test_readings.mat'}
     assert(isfile(fullfile(src, f{1})), 'b1r_repro:input', 'b1r_repro: %s missing', fullfile(src, f{1}));
 end
@@ -332,19 +426,29 @@ restoredefaultpath; addpath(cpy); addpath(here);
 setup_paths;
 experiment_core_bw('report');
 path(p0);
+rows = [rows, cmp_bw(st, root, src)];
+end
+
+function rows = cmp_bw(st, root, src)
+rows = new_rows();
 for f = {'core_bw_report.txt', 'core_bw_kpis.mat'}
     rows(end+1) = cmp_files(st, ['results/core_bw/' f{1}], fullfile(root, 'results', 'core_bw', f{1}), fullfile(src, f{1})); %#ok<AGROW>
 end
 end
 
 %% ===================== Stage: system_fa_breakdown =====================
-function rows = stage_sysfa(C, out)
+function rows = stage_sysfa(C, out, O)
 st = 'sysfa'; rows = new_rows();
-od = fullfile(out, 'sysfa', 'results'); mkdir(od);
+od = fullfile(out, 'sysfa', 'results');
 rd = fullfile(C.sysfa, 'results');
-pools = fullfile(C.tree, 'data', 'policy_pools.mat');
-system_fa_breakdown('run', pools, fullfile(rd, 'policy_evaluation.mat'), fullfile(rd, 'policy_evaluation.txt'), ...
-    fullfile(rd, 'trained_dqn.mat'), od, fullfile(rd, 'system_fa_breakdown.mat'));
+if nargin > 2 && reused(O)
+    rows(end+1) = mkrow(st, 'reused', 'info', sprintf('the outputs in %s compared again; nothing run', od));
+else
+    mkdir(od);
+    pools = fullfile(C.tree, 'data', 'policy_pools.mat');
+    system_fa_breakdown('run', pools, fullfile(rd, 'policy_evaluation.mat'), fullfile(rd, 'policy_evaluation.txt'), ...
+        fullfile(rd, 'trained_dqn.mat'), od, fullfile(rd, 'system_fa_breakdown.mat'));
+end
 for f = {'system_fa_breakdown.txt', 'system_fa_breakdown.mat'}
     rows(end+1) = cmp_files(st, ['results/' f{1}], fullfile(od, f{1}), fullfile(rd, f{1})); %#ok<AGROW>
 end
@@ -376,23 +480,28 @@ for i = 1:size(pairs, 1)
     if isfile(pairs{i, 2}), map(norm_path(pairs{i, 1})) = pairs{i, 2}; end
 end
 V = lect_values(fullfile(C.lect, 'lect_numbers.csv'), map);
-rows(end+1) = mkrow(st, 'lect_numbers.csv', ternary(V.repro_missing == 0, 'info', 'DIFF'), ...
+k = 'info'; if V.repro_missing > 0, k = 'DIFF'; elseif V.reworded > 0, k = 'DIFF-wording'; end
+rows(end+1) = mkrow(st, 'lect_numbers.csv', k, ...
     sprintf(['%d numbers: %d literal on the cited line of the source file, %d derived (not literal there); %d of them cite a file ' ...
-    'reproduced here, %d of those cited lines are missing from the reproduced file%s'], ...
-    V.n, V.literal, V.derived, V.n_repro, V.repro_missing, list_text(': ', V.missing(1:min(end, 10)))));
+    'reproduced here; %d cited lines reworded there (the row''s numbers on one reproduced line, the words differ)%s; ' ...
+    '%d cited lines missing from the reproduced file%s'], ...
+    V.n, V.literal, V.derived, V.n_repro, V.reworded, list_text(': ', V.reworded_at(1:min(end, 10))), ...
+    V.repro_missing, list_text(': ', V.missing(1:min(end, 10)))));
 end
 
 function V = lect_values(csv, map)
 % The numbers of the table's csv against the files. literal: every printed number of the row occurs on
 % its cited source line (the others are derived: a ratio, a difference). Where map holds a reproduced
 % file for the source, the cited line must occur in it word for word (anywhere: this code may print
-% more lines); repro_missing counts the cited lines that do not.
+% more lines). A cited line not there word for word is reworded when one reproduced line holds every
+% number of the row, else missing.
 opts = detectImportOptions(csv, 'Delimiter', ',');
 opts = setvartype(opts, opts.VariableNames, 'string');
 opts.VariableNamingRule = 'preserve';
 T = readtable(csv, opts);
 cache = containers.Map('KeyType', 'char', 'ValueType', 'any');
-V = struct('n', height(T), 'literal', 0, 'derived', 0, 'n_repro', 0, 'repro_missing', 0, 'missing', {{}});
+V = struct('n', height(T), 'literal', 0, 'derived', 0, 'n_repro', 0, 'repro_missing', 0, 'missing', {{}}, ...
+    'reworded', 0, 'reworded_at', {{}});
 for i = 1:height(T)
     f = char(T.source_file(i)); ln = str2double(T.source_line(i));
     nums = {};
@@ -407,8 +516,14 @@ for i = 1:height(T)
         V.n_repro = V.n_repro + 1;
         R = get_lines(cache, map(k));
         if ln < 1 || ln > numel(L) || ~any(strcmp(R, L{ln}))
-            V.repro_missing = V.repro_missing + 1;
-            V.missing{end+1} = sprintf('%s %s:%d', char(T.id(i)), f, ln);
+            at = find(arrayfun(@(j) line_has(R, j, nums), 1:numel(R)), 1);
+            if ~isempty(nums) && ~isempty(at)
+                V.reworded = V.reworded + 1;
+                V.reworded_at{end+1} = sprintf('%s %s:%d -> line %d', char(T.id(i)), f, ln, at);
+            else
+                V.repro_missing = V.repro_missing + 1;
+                V.missing{end+1} = sprintf('%s %s:%d', char(T.id(i)), f, ln);
+            end
         end
     end
 end
@@ -543,6 +658,9 @@ switch lower(e)
             first_or(k, n + 1), numel(here), quote_list(here), numel(regd), quote_list(regd));
         if isempty(regd) && is_subsequence(Lb, La)
             r = mkrow(stage, name, 'DIFF-additive', ['every registered line is here, in order; ' det]);
+        elseif numbers_kept(regd, here)
+            r = mkrow(stage, name, 'DIFF-wording', ['the registered lines not here differ in words only: each one''s numbers ' ...
+                'occur, in order, on a line printed here; ' det]);
         else
             r = mkrow(stage, name, diff_kind([here, regd], '(?i)generated:|elapsed|\(\d+(\.\d+)? min\)|created'), det);
         end
@@ -570,6 +688,23 @@ end
 
 function v = first_or(k, d)
 if isempty(k), v = d; else, v = k(1); end
+end
+
+function tf = numbers_kept(regd, here)
+% Every registered-only line has a line printed here whose numbers hold its numbers in order (here
+% may print more numbers on the line); a line without numbers differs in words only.
+nh = cellfun(@line_numbers, here, 'UniformOutput', false);
+tf = true;
+for i = 1:numel(regd)
+    nr = line_numbers(regd{i});
+    if isempty(nr), continue; end
+    if ~any(cellfun(@(h) is_subsequence(nr, h), nh)), tf = false; return; end
+end
+end
+
+function c = line_numbers(s)
+c = regexp(s, '(?<![A-Za-z_\d.])[-+]?\d+(\.\d+)?', 'match');  % F1, rx3, D121: names, not numbers
+c = regexprep(c, '^\+', '');
 end
 
 function tf = is_subsequence(b, a)
