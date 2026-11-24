@@ -5891,7 +5891,8 @@ end
 [~, map] = pool_configs(threat_params(p0, 'path_loss', C.nominal, C), 'path_loss', A);
 verifyEqual(tc, map(strcmp(A, 'channel_switch+fec_interleave')), find(strcmp(A, 'fec_interleave')));
 f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
-f = f(~contains({f.folder}, {[filesep 'legacy'], [filesep 'dev'], [filesep 'tests'], [filesep 'gui']}));
+rel = erase({f.folder}, fullfile(tc.TestData.root, 'code'));   % below code/ only: the checkout's own folder name may hold 'gui'
+f = f(~contains(rel, {[filesep 'legacy'], [filesep 'dev'], [filesep 'tests'], [filesep 'gui']}));
 rd = {};
 for i = 1:numel(f)
     src = regexprep(fileread(fullfile(f(i).folder, f(i).name)), '%[^\n]*', '');   % code only, no comments
