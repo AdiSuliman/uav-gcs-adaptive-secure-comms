@@ -1617,7 +1617,7 @@ end
 
 %% ===================== Comparisons =====================
 function [ok, why] = compare_file(a, b)
-% a against b: text line by line and JSON or MAT contents with the 'Generated' stamps set aside,
+% a against b: text line by line and JSON or MAT contents with the run's stamps set aside,
 % images pixel by pixel, anything else byte by byte.
 ok = false; why = '';
 if ~isfile(a), why = sprintf('%s absent', a); return; end
@@ -1660,12 +1660,12 @@ else, why = sprintf('line %d: "%s" against "%s"', k, cut(La{k}), cut(Lb{k})); en
 end
 
 function x = scrub(x)
-% The run's own stamps set aside: a field named generated, a line beginning with 'Generated:'.
+% The run's own stamps set aside: a field named generated or created, a line beginning with 'Generated:'.
 if isstruct(x)
     f = fieldnames(x);
     for i = 1:numel(x)
         for j = 1:numel(f)
-            if strcmpi(f{j}, 'generated'), x(i).(f{j}) = '<stamp>'; else, x(i).(f{j}) = scrub(x(i).(f{j})); end
+            if any(strcmpi(f{j}, {'generated', 'created'})), x(i).(f{j}) = '<stamp>'; else, x(i).(f{j}) = scrub(x(i).(f{j})); end
         end
     end
 elseif iscell(x)

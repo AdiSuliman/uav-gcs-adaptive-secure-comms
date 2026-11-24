@@ -455,6 +455,11 @@ KPI = struct('id', {1, 2}, 'detail', {{'a'}, {'b'}}); LECT = struct('x', 1); %#o
 save(f('a.mat'), 'KPI', 'LECT'); save(f('b.mat'), 'KPI', 'LECT');
 KPI(2).detail = {'c'}; save(f('c.mat'), 'KPI', 'LECT');
 verifyTrue(tc, adopt_reading('compare', f('a.mat'), f('b.mat')).ok);
+LB = struct('v', 1, 'created', '24-Nov-2026 06:59:00'); save(f('l1.mat'), 'LB');
+LB.created = '23-Nov-2026 10:00:00'; save(f('l2.mat'), 'LB');
+LB.v = 2; save(f('l3.mat'), 'LB');
+verifyTrue(tc, adopt_reading('compare', f('l1.mat'), f('l2.mat')).ok);
+C = adopt_reading('compare', f('l1.mat'), f('l3.mat')); verifyFalse(tc, C.ok); verifyTrue(tc, contains(C.why, 'LB.v'));
 C = adopt_reading('compare', f('a.mat'), f('c.mat')); verifyFalse(tc, C.ok); verifyTrue(tc, contains(C.why, 'KPI(2).detail'));
 im = uint8(mod(magic(100), 256)); imwrite(im, f('a.png')); imwrite(im, f('b.png'));
 im1 = im; im1(3, 3) = 255 - im1(3, 3); imwrite(im1, f('c.png'));
