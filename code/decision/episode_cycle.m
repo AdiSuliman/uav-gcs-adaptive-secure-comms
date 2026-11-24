@@ -21,7 +21,9 @@ function [E, info] = episode_cycle(E, k, fr, ctx)
 %        drop_db, cfg_gain_db), na
 %        optional: core_rule (true: the rule kinds run on the core action set, rule_core),
 %        core (the three-state CNN, console_core('load'): its state is read on the frames
-%        of this episode, over the model's window)
+%        of this episode, over the model's window), opt (the policy_decide.m options of the
+%        policy with the adopted settings, console_policy('adopt_ctx'); replaces the core
+%        option's own)
 %
 %   info: cls (top detector class), conf, unknown, prop (configuration chosen
 %   this cycle), qv (Q-values for DQN kinds, [] otherwise), switched, cfg,
@@ -56,6 +58,7 @@ if isfield(fr, 'pkt'), obs.pkt = fr.pkt; end
 prev = E.cfg;
 obs.cfg_link = prev; if isfield(fr, 'cfg_link'), obs.cfg_link = fr.cfg_link; end
 opt = struct(); if isfield(ctx, 'core_rule') && ctx.core_rule, opt = console_core('policy_opt'); end
+if isfield(ctx, 'opt') && ~isempty(ctx.opt), opt = ctx.opt; end
 [a, E.mem, d] = policy_decide(ctx.policy, obs, prev, E.mem, ctx.PP, ctx.agent, opt);
 E.cfg = a;
 qv = d.q; if ~isempty(qv), qv(~isfinite(qv)) = NaN; end

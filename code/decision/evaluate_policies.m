@@ -259,6 +259,7 @@ end
 iBase = find(strcmp(POL, sprintf('dqn_g%d', sel)));  % selected DQN alone
 dep = Q.deployed; if strcmp(dep, 'dqn'), dep = POL{iBase}; end
 iDQN = find(strcmp(POL, dep));                       % deployed policy (train_dqn.m)
+if ADP.on, ADP = adopt_options('deployed', ADP, POL{iDQN}); end   % the DQN layers apply to this row only
 if rm_on && startsWith(dep, 'dqn'), LBL{iDQN} = [LBL{iDQN} ', with the release on evidence']; end
 LBL{iDQN} = [LBL{iDQN} ' (deployed)'];
 col = @(p) find(strcmp(POL, p));

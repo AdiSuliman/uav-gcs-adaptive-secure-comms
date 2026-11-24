@@ -1,4 +1,4 @@
-function export_gui_bundle(target, root)
+function export_gui_bundle(target, root, adopt)
 %EXPORT_GUI_BUNDLE  Copy what the operator console needs from this checkout's trained
 %   system into target/rx<n_rx> (default: profiles/ under the project root), so one
 %   console switches between the antenna profiles (demo_gui.m, 'UAV antennas' menu).
@@ -6,6 +6,10 @@ function export_gui_bundle(target, root)
 %   export_gui_bundle(target)          into another folder (the launcher collects the
 %                                      three profiles in the main checkout)
 %   export_gui_bundle(target, root)    from the checkout at root
+%   export_gui_bundle(target, root, adopt)   with the adopted settings of the manifest(s) adopt
+%                                      (a path or a cell of paths of adoption.json, adopt_reading.m)
+%                                      in profile.json (field adopt, adopt_options.m), which the
+%                                      console reads at its start; none by default: the registered chain
 %   The bundle mirrors the repository layout (params.mat, profile.json, data/, results/),
 %   without the multi-GB dataset files: the normalisation statistics come as
 %   data/gui_norm_stats.mat, and the clean-link reference of the decision layer as a small
@@ -21,6 +25,8 @@ function export_gui_bundle(target, root)
 %   is removed from the bundle as well: the console shows no stale number. The checkout at
 %   root is only read: statistics newer than its cache are written into the bundle alone.
 if nargin < 2 || isempty(root), root = project_root(); end
+if nargin < 3, adopt = {}; end
+ad = adopt_of(adopt);
 if nargin < 1 || isempty(target), target = fullfile(root, 'profiles'); end
 S = load(fullfile(root, 'params.mat')); n = S.params.n_rx;
 dst = fullfile(target, sprintf('rx%d', n));
@@ -67,12 +73,34 @@ for f = opt
     if ismember(f{1}, bad), stale{end+1} = f{1}; else, miss{end+1} = f{1}; end %#ok<AGROW>
 end
 fid = fopen(fullfile(dst, 'profile.json'), 'w');
-fprintf(fid, '{"profile":"%d UAV antennas","n_rx":%d}\n', n, n); fclose(fid);
+if isempty(fieldnames(ad))
+    fprintf(fid, '{"profile":"%d UAV antennas","n_rx":%d}\n', n, n);
+else
+    fprintf(fid, '%s\n', jsonencode(struct('profile', sprintf('%d UAV antennas', n), 'n_rx', n, 'adopt', ad)));
+end
+fclose(fid);
 fprintf('GUI bundle: %d UAV antennas -> %s\n', n, dst);
 if ~isempty(miss), fprintf('  not exported (not produced yet; none in the bundle): %s\n', strjoin(miss, ', ')); end
 if ~isempty(stale)
     warning('export_gui_bundle:stale', 'not exported (stale, result_status.m; none in the bundle): %s', strjoin(stale, ', '));
 end
+end
+
+function ad = adopt_of(adopt)
+% CFG.adopt of the manifests, checked by adopt_options.m; a name in two manifests needs the same setting.
+if ischar(adopt) || isstring(adopt), adopt = cellstr(adopt); end
+ad = struct();
+for k = 1:numel(adopt)
+    if ~isfile(adopt{k}), error('export_gui_bundle:adopt', 'no adoption manifest %s', adopt{k}); end
+    a = adopt_reading('cfg', jsondecode(fileread(adopt{k}))).adopt;
+    for f = fieldnames(a)'
+        if isfield(ad, f{1}) && ~strcmp(ad.(f{1}), a.(f{1}))
+            error('export_gui_bundle:adopt', 'adoption %s is %s in one manifest and %s in another', f{1}, ad.(f{1}), a.(f{1}));
+        end
+        ad.(f{1}) = a.(f{1});
+    end
+end
+if ~isempty(fieldnames(ad)), adopt_options(struct('adopt', ad)); end
 end
 
 function export_clean_ref(root, dst)

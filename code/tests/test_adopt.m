@@ -71,8 +71,11 @@ for n = {'none', 'random', 'fixed', 'fixed_mmse', 'table', 'table_relm', 'table_
     end
 end
 verifyError(tc, @() adopt_options(struct('adopt', struct('rule_fx', 'keep'))), 'adopt_options:name');
-verifyError(tc, @() adopt_options(struct('adopt', struct('dqn_hop', 'q'))), 'adopt_options:dqn_hop');
-verifyError(tc, @() adopt_options(struct('adopt', struct('rule_fix', 'keep', 'dqn_hop', 'rule'))), 'adopt_options:dqn_hop');
+A2 = adopt_options(struct('adopt', struct('dqn_hop', 'q')));
+verifyEqual(tc, {A2.on, A2.dqn_hop, A2.names, A2.rule_fix}, {true, 'q', {'dqn_hop'}, ''});
+A2 = adopt_options(struct('adopt', struct('rule_fix', 'keep', 'dqn_hop', "rule")));
+verifyEqual(tc, {A2.dqn_hop, A2.names}, {'rule', {'rule_fix', 'dqn_hop'}});
+verifyError(tc, @() adopt_options(struct('adopt', struct('dqn_hop', 'fec'))), 'dqn_fix:token');
 verifyError(tc, @() adopt_options(struct('adopt', 'keep')), 'adopt_options:value');
 verifyError(tc, @() adopt_options(struct('adopt', struct('rule_fix', 'keep+notch'))), 'rule_fix:token');
 verifyEqual(tc, adopt_options('names'), {'rule_fix', 'dqn_hop'});
@@ -93,14 +96,16 @@ function test_evaluate_policies_off_is_the_parent(tc)
 % when CFG.adopt is absent (test_options_off).
 [missing, added] = line_diff(tc, tc.TestData.base, 'code/decision/evaluate_policies.m');
 verifyEqual(tc, missing, {});
-verifyEqual(tc, added, ...
+verifyEqual(tc, added(:)', ...
     {'ADP = adopt_options(cfg6);                           % adopted settings (CFG.adopt, adopt_options.m), off by default', ...
     'if FRESH && ADP.on, error(''evaluate_policies:adopt'', ''evaluate_policies: an adoption is not read on the fresh KPI 6 set''); end', ...
+    'if ADP.on, ADP = adopt_options(''deployed'', ADP, POL{iDQN}); end   % the DQN layers apply to this row only', ...
     '        opt = adopt_options(''opt'', ADP, POL{pk}, opt);', ...
     '    opt = adopt_options(''opt'', ADP, POL{iDQN}, opt);', ...
     'opt = adopt_options(''opt'', ADP, POL{iDQN}, opt);', ...
     'if ADP.on, rep{end+1} = adopt_options(''note'', ADP); end', ...
     '        opt = adopt_options(''opt'', ADP, POL{pk}, opt);'});
+verifyNumElements(tc, added, 8);
 src = strrep(fileread(fullfile(tc.TestData.root, 'code', 'decision', 'evaluate_policies.m')), char(13), '');
 verifyNumElements(tc, strfind(src, 'policy_setup('), 6);          % six calls: the hook follows four, not the completion's DQN nor the fresh set's
 verifyNumElements(tc, strfind(src, 'adopt_options(''opt'''), 4);
@@ -346,7 +351,7 @@ verifyEqual(tc, adopt_options(C).rule_fix, 'keep+st+rate');
 M.adoptions = struct('name', {'dqn_hop', 'rule_fix'}, 'setting', {'q', 'keep+st+rate'});
 verifyError(tc, @() adopt_reading('cfg', M), 'adopt_reading:order');
 M.adoptions = struct('name', {'rule_fix', 'dqn_hop'}, 'setting', {'keep+st+rate', 'q'});
-verifyError(tc, @() adopt_reading('cfg', M), 'adopt_options:dqn_hop');    % the order is accepted, the layer is not here
+verifyEqual(tc, adopt_reading('cfg', M).adopt, struct('rule_fix', 'keep+st+rate', 'dqn_hop', 'q'));
 M.adoptions = struct('name', {'rule_fix', 'other'}, 'setting', {'keep+st+rate', 'x'});
 verifyError(tc, @() adopt_reading('cfg', M), 'adopt_reading:order');
 M.adoptions = {struct('name', 'rule_fix', 'setting', 'keep')};    % a list of differing objects decodes to a cell

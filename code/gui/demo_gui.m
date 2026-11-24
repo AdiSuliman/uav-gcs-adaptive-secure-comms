@@ -89,6 +89,8 @@ env.class_list = cellstr(D.classes(:));
 env.classes    = D.classes;
 env.dqn_agent  = Q.agent;
 env.dep        = dep;
+env.adopt      = console_policy('adopt', 'profile.json');   % the bundle's adopted settings; off when it names none
+if env.adopt.on, fprintf('  adopted settings: %s\n', strjoin(env.adopt.names, ', ')); end
 env.feat_mean  = featMean;
 env.feat_std   = featStd;
 env.p0         = p0;
@@ -1281,12 +1283,15 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     dep = env.dep; kindD = console_policy('kind', dep, dep.esc);     % the deployed policy, as train_dqn.m chose it
     PPd = console_policy('settings', dep, PPr, true);                % a rule fallback: its own monitor, the slider's threshold
     cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
-    cfgC = env.na; memC = []; coreOpt = console_core('policy_opt');
+    cfgC = env.na; memC = [];
+    optD = console_policy('opt', dep, env.adopt, 'deployed', struct());   % adopted settings; struct() when off
+    optR = console_policy('opt', dep, env.adopt, 'rule', struct());
+    coreOpt = console_policy('opt', dep, env.adopt, 'core', console_core('policy_opt'));
     for i = 1:size(leadF, 1)                                    % clean lead-in: reference only
         obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'maha', mahaL(i), 'feat', leadF(i, :), ...
             'ber', leadB(i), 'gant', leadG(i, :), 'idle', leadI(i, :), 'bch', leadC(i, :), 'mmse_pred', leadM(i));
-        [cfgD, memD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent);
-        [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
+        [cfgD, memD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent, optD);
+        [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, [], optR);
         [cfgC, memC] = policy_decide('rule_esc', obs, cfgC, memC, PPr, [], coreOpt);
     end
     if cfgD ~= env.na
@@ -1302,9 +1307,9 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
             'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))', 'idle', F.idle(:, vf(i))', 'bch', F.bch(:, vf(i))', ...
             'mmse_pred', F.mmse_pred(vf(i)));
         t2 = tic;
-        [cfgD, memD, dD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent);
+        [cfgD, memD, dD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent, optD);
         dqn_ms = toc(t2) * 1000;
-        [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
+        [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, [], optR);
         [cfgC, memC] = policy_decide('rule_esc', obs, cfgC, memC, PPr, [], coreOpt);
     end
     st3 = [];                                                 % the window's frames of the three-state CNN
@@ -2238,6 +2243,9 @@ function runEpisode(btn, ~)
         ctx{i}.core_rule = strcmp(policies{i}, 'core');
         if strcmp(policies{i}, 'dqn')                          % the deployed policy: the DQN, or the rule fallback on its own monitor
             ctx{i} = console_policy('ctx', env.dep, esc, ctx{i});
+        end
+        if ismember(policies{i}, {'dqn', 'rule', 'core'})      % the adopted settings of the bundle, none when off
+            ctx{i} = console_policy('adopt_ctx', env.dep, env.adopt, policies{i}, ctx{i});
         end
     end
     rsE = RandStream('mt19937ar', 'Seed', seed);               % same sub-run and frame positions for every policy

@@ -26,12 +26,25 @@ function varargout = console_policy(cmd, varargin)
 %   ctx = console_policy('ctx', D, esc, ctx)
 %       the episode context (episode_cycle.m) of the deployed policy: its policy_decide.m kind
 %       and its settings in ctx.PP.
+%   A = console_policy('adopt', file)
+%       the adopted settings of the bundle (adopt_options.m): the field adopt of file (default
+%       profile.json), a struct of named settings (rule_fix, dqn_hop); absent file or field: off.
+%   opt = console_policy('opt', D, A, which, opt)
+%       the policy_decide.m options of one console policy with the adopted settings, as
+%       evaluate_policies.m applies them to the same row: which 'deployed' (D.kind's row),
+%       'rule' (rule_esc), 'core' (rule_core); opt the options the policy has without them.
+%       A off: opt unchanged.
+%   ctx = console_policy('adopt_ctx', D, A, which, ctx)
+%       ctx.opt (episode_cycle.m) of the policy which ('dqn', 'rule', 'core'); A off: ctx unchanged.
 switch cmd
     case 'load',     varargout{1} = load_deployed(varargin{:});
     case 'deployed', varargout{1} = deployed_of(varargin{:});
     case 'kind',     varargout{1} = kind_of(varargin{:});
     case 'settings', varargout{1} = settings_of(varargin{:});
     case 'ctx',      varargout{1} = episode_ctx(varargin{:});
+    case 'adopt',    varargout{1} = adopt_of(varargin{:});
+    case 'opt',      varargout{1} = adopt_opt(varargin{:});
+    case 'adopt_ctx', varargout{1} = adopt_ctx(varargin{:});
     otherwise, error('console_policy:cmd', 'console_policy: unknown command %s', cmd);
 end
 end
@@ -107,4 +120,38 @@ if slider
     end
 end
 PP = decision_settings(PP, m);
+end
+
+function A = adopt_of(file)
+if nargin < 1 || isempty(file), file = 'profile.json'; end
+ad = [];
+if isfile(file)
+    P = jsondecode(fileread(file));
+    if isstruct(P) && isfield(P, 'adopt'), ad = P.adopt; end
+end
+A = adopt_options(struct('adopt', ad));
+end
+
+function opt = adopt_opt(D, A, which, opt)
+if ~(isstruct(A) && isfield(A, 'on') && A.on), return; end
+switch which
+    case 'deployed', row = D.kind;
+    case 'rule',     row = 'rule_esc';
+    case 'core',     row = 'rule_core';
+    otherwise, error('console_policy:which', 'console_policy: unknown policy %s', which);
+end
+A = adopt_options('deployed', A, D.kind);
+opt = adopt_options('opt', A, row, opt);
+end
+
+function ctx = adopt_ctx(D, A, which, ctx)
+if ~(isstruct(A) && isfield(A, 'on') && A.on), return; end
+o = struct();
+switch which
+    case 'dqn',  o = adopt_opt(D, A, 'deployed', o);
+    case 'rule', o = adopt_opt(D, A, 'rule', o);
+    case 'core', o = adopt_opt(D, A, 'core', console_core('policy_opt'));
+    otherwise, error('console_policy:which', 'console_policy: unknown policy %s', which);
+end
+ctx.opt = o;
 end
