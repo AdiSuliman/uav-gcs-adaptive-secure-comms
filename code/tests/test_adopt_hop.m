@@ -15,6 +15,7 @@ setup_paths;
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.tree_rev = '978ee31';                                % profile 3's HEAD, the tree's code
+tc.TestData.hop_tip = '4a820aa';                                 % the hop reading's line (tag asrun-2511-adopt-hop-p3)
 end
 
 function teardownOnce(tc)
@@ -113,8 +114,14 @@ assertEqual(tc, st, 0, out);
 f = strsplit(strtrim(strrep(out, char(13), '')), newline);
 f = f(endsWith(f, '.m') & ~startsWith(f, 'code/tests/'));
 f = erase(f, 'code/');
-verifyEqual(tc, setdiff(f, K.may_differ), cell(1, 0));
 verifyEmpty(tc, setdiff(K.may_differ, [f, {'evaluation/calibration_reading.m'}]));   % no stale entry
+extra = setdiff(f, K.may_differ);
+[st, out] = system(sprintf('git --no-optional-locks -C "%s" diff --name-only %s HEAD -- code', tc.TestData.root, tc.TestData.hop_tip));
+assertEqual(tc, st, 0, out);
+merged = erase(strsplit(strtrim(strrep(out, char(13), '')), newline), 'code/');
+verifyEqual(tc, setdiff(extra, merged), cell(1, 0));             % every extra file came in after the hop line
+if ~isempty(extra), assumeFail(tc, sprintf(['as-run pin of the hop reading (tag asrun-2511-adopt-hop-p3); ' ...
+        'the merged line adds %d files from the other lines and reproduces this reading from the tag'], numel(extra))); end
 end
 
 function test_registered_outputs(tc)
