@@ -12,6 +12,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 mkdir('data');
@@ -504,7 +505,7 @@ src = fileread(which('evaluate_policies'));                                % the
 verifyNotEmpty(tc, strfind(src, ['POL = [POL, {''rule_esc_nos1g''}]; LBL = [LBL, {''rule + escalation, without the lost-branch gate ' ...
     '(descriptive; the reference on the lost-branch classes)''}];']));
 verifyNotEmpty(tc, strfind(src, 'if s1_on || s1_off, KP.s1g_lines = s1gl; end'));
-verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'det = [det, P.KP.s1g_lines];'));
+verifyNotEmpty(tc, strfind(src_of('measure_all_kpis'), 'det = [det, P.KP.s1g_lines];'));
 src = fileread(which('train_dqn'));                                        % chosen first, kept for every later step
 verifyNotEmpty(tc, strfind(src, '[Sg, GROWS] = s1g_step(S0, S1STEP, evr, FA_BOUND, PK, PPr, K, val_spec, val_thr, H, CV, EBNO_THR);'));
 verifyNotEmpty(tc, strfind(src, '[Ssel, SROWS] = choose_settings(Sg, STEPS, evr, FA_BOUND, PK);'));
@@ -775,7 +776,7 @@ verifyNotEmpty(tc, strfind(src, 'for pk = find(endsWith(POL, {''_norelm'', ''_re
 src = fileread(which('rollout_policy'));
 verifyNotEmpty(tc, strfind(src, 'if isfield(opt, ''rel_on'') && opt.rel_on'));
 verifyNotEmpty(tc, strfind(src, 'R.rel_on = sum(tr.cfg == K.na & prev ~= K.na & tr.post & ~tr.ended, 1);'));
-src = fileread(which('measure_all_kpis'));
+src = src_of('measure_all_kpis');
 verifyNotEmpty(tc, strfind(src, 'kn = find(strcmp(P.POL, [P.POL{iQ} ''_norelm'']), 1); kr0 = col(''rule_esc_norelm'');'));
 end
 
@@ -791,7 +792,7 @@ verifyNotEmpty(tc, strfind(src, 'if startsWith(dpn, ''dqn''), xr{end+1} = [dpn '
 verifyNotEmpty(tc, strfind(src, 'for pk = find(endsWith(POL, {''_norelm'', ''_relm''}))'));
 verifyNotEmpty(tc, strfind(src, 'rep = [rep, MNOTE];'));
 verifyNotEmpty(tc, strfind(src, 'if ~isempty(MNOTE), KP.monitor_note = MNOTE; end'));
-src = strrep(fileread(which('measure_all_kpis')), char(13), '');
+src = strrep(src_of('measure_all_kpis'), char(13), '');
 verifyNotEmpty(tc, strfind(src, 'kp = find(strcmp(P.POL, [P.POL{iQ} ''_relm'']), 1); kr1 = col(''rule_esc_relm'');'));
 verifyNotEmpty(tc, strfind(src, 'if isfield(P.KP, ''monitor_note''), det = [det, P.KP.monitor_note]; end'));
 verifyTrue(tc, strfind(src, 'P.KP.monitor_note') < strfind(src, 'if isfield(P.KP, ''lect'')                          % revised proposal: PER vs the static link'));   % before the lecturer lines
@@ -889,7 +890,7 @@ verifyNotEmpty(tc, strfind(src, 'if WF.r9, save(''data/trained_dqn.mat'', ''R9RO
 src = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(src, '[R9ROWS, r9l] = ebno_rows(Rr.recovered(mr9), Rr.s(mr9), Rr.geom(mr9), PP.scen(Rr.scn(mr9)), PP.ebno, PP.clean_fer(:)'', ...'));
 verifyNotEmpty(tc, strfind(src, 'if WF.r9, KP.ebno_rows = R9ROWS; KP.ebno_lines = r9l; end'));
-src = fileread(which('measure_all_kpis'));
+src = src_of('measure_all_kpis');
 verifyNotEmpty(tc, strfind(src, 'if isfield(P.KP, ''ebno_lines''), det = [det, P.KP.ebno_lines]; end'));
 end
 

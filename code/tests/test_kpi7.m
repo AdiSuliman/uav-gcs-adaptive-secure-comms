@@ -14,6 +14,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 tc.TestData.base = '81ecc06';                            % the branch's base: the code before the changes
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
@@ -321,8 +322,8 @@ end
 function test_latency_readers(tc)
 % Every field the KPI summary, the report export and the console read from LAT is written.
 src = fileread(which('measure_latency'));
-k = fileread(which('measure_all_kpis'));
-g = function_text(fileread(which('demo_gui')), 'plotLatency');
+k = src_of('measure_all_kpis');
+g = function_text(src_of('demo_gui'), 'plotLatency');
 rd = [regexp(k, '\<Lt\.(\w+)', 'tokens'), regexp(k, '\<sc\.(\w+)', 'tokens'), regexp(g, '\<Lt\.(\w+)', 'tokens')];
 rd = setdiff(unique(cellfun(@(c) c{1}, rd, 'UniformOutput', false)), {'LAT'});   % Lt = Lt.LAT
 for i = 1:numel(rd)

@@ -12,6 +12,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 tc.TestData.cwd = pwd;
 tc.TestData.base = '8cfb172';                      % profile 3's commit the print fixes are ported onto
 end
@@ -372,7 +373,7 @@ end
 
 %% ---------- wiring ----------
 function test_wiring_of_the_print_fixes(tc)
-mk = fileread(which('measure_all_kpis'));
+mk = src_of('measure_all_kpis');
 for t = {'kpi_print_text(''kpi1_all'', m)', 'kpi_print_text(''kpi1_every'', m)', 'kpi_print_text(''kpi4_lower'', te, pe(he), eci(he, :))', ...
         'kpi_print_text(''kpi7_spread'', P.KP.speed_spread, 10)', 'kpi_print_text(''edge_distance'', en, inom)', ...
         'kpi_print_text(''leave_out'', Cg.res', 'kpi_print_text(''leave_out'', Cu.res', 'kpi_print_text(''gcsa'', splitlines(fileread(F.gcsa)))', ...
@@ -387,7 +388,7 @@ verifyEmpty(tc, strfind(mk, 'edge_km('));
 % the registered rules are as they were: KPI 4 counts the point estimates, KPI 7 the point spread
 verifyNotEmpty(tc, strfind(mk, 'status(any(he) && all(pe(he) >= 90), stale), det);'));
 verifyNotEmpty(tc, strfind(mk, 'st7 = status(lat_ok && max(pv) - min(pv) <= 10, stale);'));
-em = fileread(which('edge_map'));
+em = src_of('edge_map');
 % REC, PROT, REC_h and PROT_h are per-onset rates (no k of n): their cells print no fl share
 verifyNotEmpty(tc, strfind(em, 'cell_txt(PT.(LAY{f})(i, s), fmt), 1:nS'));
 verifyEmpty(tc, strfind(em, 'cell_txt(PT.(LAY{f})(i, s), fmt, fl)'));
@@ -538,7 +539,7 @@ verifyEqual(tc, kpi_print_text('receiver', struct('n_rx', 4, 'rx_ne_fix', '')), 
 verifyEqual(tc, kpi_print_text('receiver', struct('rx_ne_fix', 'twinb')), 'Receiver: rx_ne_fix twinb (not r1)');
 verifyEqual(tc, kpi_print_text('receiver', struct('rx_ne_fix', 2)), 'Receiver: rx_ne_fix 2 (not r1)');
 verifyEqual(tc, kpi_print_text('receiver', struct()), 'Receiver: unknown (params.mat not found)');
-src = fileread(which('measure_all_kpis'));
+src = src_of('measure_all_kpis');
 verifyTrue(tc, contains(src, 'kpi_print_text(''receiver'', rx_p_)'));
-verifyTrue(tc, contains(fileread(which('edge_map')), 'kpi_print_text(''receiver'', p0)'));
+verifyTrue(tc, contains(src_of('edge_map'), 'kpi_print_text(''receiver'', p0)'));
 end

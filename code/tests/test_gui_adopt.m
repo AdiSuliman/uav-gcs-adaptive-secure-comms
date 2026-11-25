@@ -13,6 +13,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.warn = warning('off', 'MATLAB:load:variableNotFound');
@@ -52,7 +53,7 @@ end
 
 function test_console_passes_the_options(tc)
 % Every policy_decide.m call of the console carries an option, and the episode cycle reads ctx.opt.
-src = strrep(fileread(which('demo_gui')), char(13), '');
+src = strrep(src_of('demo_gui'), char(13), '');
 calls = regexp(src, 'policy_decide\([^\n]*', 'match');
 verifyNumElements(tc, calls, 6);
 verifyTrue(tc, all(cellfun(@(c) contains(c, {'optD)', 'optR)', 'coreOpt)'}), calls)));
@@ -243,7 +244,7 @@ end
 end
 
 function test_console_wires_the_lines(tc)
-src = strrep(fileread(which('demo_gui')), char(13), '');
+src = strrep(src_of('demo_gui'), char(13), '');
 verifyNotEmpty(tc, strfind(src, 'console_policy(''adopt_line'', env.adopt)'));
 verifyNotEmpty(tc, strfind(src, 'console_policy(''kpi_note'', env.adopt, isfile(''results/adoption_note.txt''))'));
 verifyNotEmpty(tc, strfind(src, 'decRows = {''1x'', 68}; if ~isempty(adoptTxt)'));   % off: the two-row layout as it was

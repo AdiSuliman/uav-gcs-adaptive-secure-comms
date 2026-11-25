@@ -12,6 +12,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.tree_rev = '978ee31';                                % profile 3's HEAD, the tree's code
@@ -97,7 +98,7 @@ for f = {'experiment_combo_generalization', 'experiment_unknown_threat'}
     verifyNumElements(tc, strfind(s, 'Q.adopt'), 2, f{1});        % the hybrid columns only
     verifyNumElements(tc, strfind(s, 'if ADP.on, Q.adopt = ADP; end'), 1, f{1});
 end
-e = strrep(fileread(which('edge_map')), char(13), '');
+e = strrep(src_of('edge_map'), char(13), '');
 verifyNumElements(tc, strfind(e, 'if strcmp(POL{pk}, dep), opt = adopt_options(''dqn'', ADP, opt); end'), 2);
 verifyNumElements(tc, strfind(e, 'opt = adopt_options(''dqn'', ADP, opt);'), 3);
 l = strrep(fileread(which('measure_latency')), char(13), '');

@@ -12,6 +12,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 mkdir('data');
@@ -625,7 +626,7 @@ verifyNotEmpty(tc, strfind(fl, 'nm = ''dqn_esc''; if strcmp(dqn_selected_kind(Q)
 verifyNotEmpty(tc, pos('error(''evaluate_policies:lb_forced'''));
 verifyNotEmpty(tc, pos('isfield(Q.dec, ''lb_forced'') && Q.dec.lb_forced && ~(exist(''SMOKE'', ''var'') && SMOKE)'));
 % KPI 5 prints the line only with the columns
-k = fileread(which('measure_all_kpis'));
+k = src_of('measure_all_kpis');
 verifyNotEmpty(tc, strfind(k, 'if isfield(P, ''LBC'') && ~isempty(P.LBC), det = [det, P.LBC.kpi]; end'));
 end
 

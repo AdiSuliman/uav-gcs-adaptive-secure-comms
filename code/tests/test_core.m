@@ -10,6 +10,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.cfg = Simulink.fileGenControl('getConfig');
@@ -41,6 +42,27 @@ for i = 1:numel(f)
 end
 verifyGreaterThan(tc, numel(f), 50);
 verifyEmpty(tc, bad, strjoin(bad, ', '));
+end
+
+function test_src_of_equals_fileread(tc)
+% src_of returns the stored text of the file behind a name: byte-equal to fileread for
+% every file of the code that a name resolves to (all four source-reading targets among them).
+f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
+f = f(~contains({f.folder}, [filesep 'legacy']));
+n = 0; bad = {};
+for i = 1:numel(f)
+    [~, nm] = fileparts(f(i).name);
+    p = which(nm);
+    if isempty(p) || ~strcmpi(p, fullfile(f(i).folder, f(i).name)), continue; end
+    n = n + 1;
+    if ~strcmp(src_of(nm), fileread(p)), bad{end+1} = nm; end %#ok<AGROW>
+end
+verifyGreaterThan(tc, n, 50);
+verifyEmpty(tc, bad, strjoin(bad, ', '));
+for nm = {'edge_map', 'demo_gui', 'measure_all_kpis', 'build_threat_model'}
+    verifyEqual(tc, src_of(nm{1}), fileread(which(nm{1})));
+end
+verifyError(tc, @() src_of('no_such_function_xyz'), ?MException);
 end
 
 function test_parallel_turn_owner(tc)
@@ -85,7 +107,7 @@ verifyGreaterThan(tc, b, strfind(src, 'T.(dv) = struct('));
 verifyLessThan(tc, b, strfind(src, '%% 3. Report'));
 verifyNotEmpty(tc, strfind(src, 'LAT.load = struct(''before'', ld0, ''after'', ld1);'));
 verifyNotEmpty(tc, strfind(src, 'rep{end+1} = LAT.load_text;'));
-verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'det{end+1} = Lt.load_text;'));
+verifyNotEmpty(tc, strfind(src_of('measure_all_kpis'), 'det{end+1} = Lt.load_text;'));
 end
 
 function test_gui_bundle_drops_stale(tc)
@@ -144,7 +166,7 @@ end
 p = console_scenario(p0, sev, 'airframe_shadowing', 0, 10);
 [fl, why] = console_flights(p, 9, 10, 1000, 1);
 verifyEmpty(tc, fl); verifyNotEmpty(tc, why);
-src = fileread(which('demo_gui'));
+src = src_of('demo_gui');
 verifyNotEmpty(tc, strfind(src, '[~, FL] = simRun(env, pl, snr_dB, fl);'));
 verifyNotEmpty(tc, strfind(src, '[out, F] = simRun(env, p, snr_dB, fl);'));
 verifyNotEmpty(tc, strfind(src, '[out2, F2] = simRun(env, p2, snr_dB + g_db, fl);'));
@@ -771,7 +793,7 @@ verifyEqual(tc, [d.value, dh.value, du.value, dh.n, du.n], [0.5 1 0 36 36], 'Abs
 verifyEqual(tc, [dh.verdict, du.verdict, d.verdict], [1 -1 -1]);
 [d2, dh2] = det_layers(F, TGT, 500);
 verifyEqual(tc, [d2.value, dh2.value], [d.value, dh.value]);
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyTrue(tc, contains(src, '[BL.det(i, s), BL.deth(i, s), BL.detu(i, s)] = det_layers(F, TGT, B);'));
 end
 
@@ -856,7 +878,7 @@ for r = 1:500
     pw = pw + (held_verdict(held_pairs(rs, n, 0.97, 0), ep, 1:n, 0.9, false, B).verdict == 1);
 end
 verifyGreaterThanOrEqual(tc, pw / 500, 0.85);
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyNotEmpty(tc, strfind(src, '''link'', link_target(p0.n_rx), ''linkt_floor'', 0.014, ...'));
 verifyNotEmpty(tc, strfind(src, '''held_flight'', false);'));
 verifyNotEmpty(tc, strfind(src, 'TGT0 = TGT; TGT0.link = 0.014; TGT0.held_flight = true;'));
@@ -868,7 +890,7 @@ verifyEmpty(tc, strfind(src, 'whatever the correlation'));
 verifyNotEmpty(tc, strfind(src, 'X10.rec(i, s).verdict, FAV], ''DSRF'');'));
 verifyNotEmpty(tc, strfind(src, 'PT.sysl_pre(i, s) = all_of([PT.sys_pre(i, s), CL.link_pre(s).verdict], ''SL'');'));
 verifyNotEmpty(tc, strfind(src, '''counts_sysl_pre'', [cnt_of(VD.sysl_pre, isg); cnt_of(VD.sysl_pre, ~isg)]'));
-verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'cnt(en.commit_pre_combined(k, :))'));
+verifyNotEmpty(tc, strfind(src_of('measure_all_kpis'), 'cnt(en.commit_pre_combined(k, :))'));
 end
 
 function h = held_pairs(rs, n, p, rho)
@@ -894,7 +916,7 @@ A0 = lk(a, 0.014);
 verifyEqual(tc, A0.verdict, -1);
 verifyEqual(tc, [A0.lo, A0.hi], [A.lo, A.hi]);
 verifyEqual(tc, lk(zeros(1, n), 0.014).verdict, 1);
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyNotEmpty(tc, strfind(src, 'CL.link(s) = edge_verdict(F.link_k, F.link_n, F.geo, TGT.link, ''le'', false, B);'));
 verifyNotEmpty(tc, strfind(src, 'CL.link_pre(s) = edge_verdict(F.link_k, F.link_n, F.geo, TGT0.link, ''le'', false, B);'));
 verifyNotEmpty(tc, strfind(src, 'CB.link_pre(b) = edge_verdict(F.link_k, F.link_n, F.geo, TGT0.link, ''le'', false, B);'));
@@ -902,7 +924,7 @@ verifyNotEmpty(tc, strfind(src, 'lk0 = edge_verdict(Fb.link_k, Fb.link_n, Fb.geo
 verifyNotEmpty(tc, strfind(src, 'LINK_J = 0.10;'));
 verifyNotEmpty(tc, strfind(src, 'up to 1e-3 packet error loss rate (3GPP TR 36.777, Table 5.1-1)'));
 verifyNotEmpty(tc, strfind(src, '''link_verdict_pre'', [CL.link_pre.verdict]'));
-verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'lt = en.link_target;'));
+verifyNotEmpty(tc, strfind(src_of('measure_all_kpis'), 'lt = en.link_target;'));
 end
 
 function test_edge_link_target_by_antennas(tc)
@@ -916,7 +938,7 @@ verifyEqual(tc, sprintf('%g', 100 * link_target(4)), '5.39');
 for n = [1 2 5 8]
     verifyError(tc, @() link_target(n), 'link_target:noValue');
 end
-src = fileread(which('edge_map')); kp = fileread(which('measure_all_kpis'));
+src = src_of('edge_map'); kp = src_of('measure_all_kpis');
 verifyNotEmpty(tc, strfind(src, '''fa'', 0.05, ''link'', link_target(p0.n_rx), ''linkt_floor'', 0.014, ...'));
 verifyNotEmpty(tc, strfind(src, 'TGT0 = TGT; TGT0.link = 0.014;'));
 verifyEmpty(tc, [strfind(src, '0.057'), strfind(src, '0.0539'), strfind(kp, '0.057'), strfind(kp, '0.0539')]);
@@ -940,7 +962,7 @@ old = {'function P = pol_layers_old(F, v, sk, TGT, B)', 's = F.(sk); h = F.harm;
     'P.prot_h = edge_verdict(F.held_k(h, v), F.ep_n(h, v), F.geo(h), TGT.prot, ''ge'', true, B);', ...
     'P.tgt = max(2 * sum(F.cl_k, ''omitnan'') / max(sum(F.cl_n, ''omitnan''), 1), TGT.link);', ...
     'P.linkt = edge_verdict(F.lt_k(:, v), F.lt_n(:, v), F.geo, P.tgt, ''le'', false, B);', 'end'};
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 i0 = strfind(src, 'function P = pol_layers(');
 verifyNumElements(tc, i0, 1);
 i1 = regexp(src(i0:end), '\r?\nend\r?\n', 'end', 'once');
@@ -1913,7 +1935,7 @@ verifyLessThan(tc, max(L), seed_base(700001));
 % Frame-draw seeds of the edge map's rollouts (edge_map.m: one base per set, the same at
 % every signalling delay, + batch below 1000; the base sets 200 000 + 1000 x set, at
 % most 99): disjoint ranges, all below the first flight stream
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 b = sort(cellfun(@(x) str2double(x{1}), regexp(src, 'policy_run_set\([^\n]*opt, (\d{5,6})', 'tokens')));
 verifyEqual(tc, b, [40000 90000 95000 200000]);
 verifyEmpty(tc, regexp(src, 'policy_run_set\([^\n]*\* d\)', 'once'));
@@ -4782,7 +4804,7 @@ for t0 = [0.1 0.6 1.0 2.2]
     f = (los_phase(40, a, 20, fd, t0 + h) - los_phase(40, a, 20, fd, t0 - h)) / (2 * h) / (2*pi);
     verifyEqual(tc, f, fd * sind(40 + dp), 'AbsTol', 0.5);
 end
-verifyNotEmpty(tc, strfind(fileread(which('build_threat_model')), ...
+verifyNotEmpty(tc, strfind(src_of('build_threat_model'), ...
     'los_phase(aoa(%d), att, yaw, fd, t(1)) + 2*pi*fd*sind(aoa(%d) + dp) * (t - t(1))'));
 verifyNotEmpty(tc, strfind(fileread(which('idle_rssi')), 'los_phase(ctx.aoa(c), att, ctx.yaw, ctx.fd, tq)'));
 verifyNotEmpty(tc, strfind(fileread(which('emitter_idle')), 'los_phase(be, ctx.att, ctx.yaw, ctx.fd * cosd(ee(u)), tq)'));
@@ -5231,7 +5253,7 @@ verifyNotEmpty(tc, strfind(rs, 'DET_TEST = ''fresh2'';'));
 ed = fileread(which('eval_detector'));
 verifyNotEmpty(tc, strfind(ed, 'if read_fresh2, tag = ''_fresh2''; end'));
 verifyNotEmpty(tc, strfind(ed, 'Sf = load(''data/splits_fresh2.mat'');'));
-verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'F.det = kpi1_file(''eval_detector_metrics'');'));
+verifyNotEmpty(tc, strfind(src_of('measure_all_kpis'), 'F.det = kpi1_file(''eval_detector_metrics'');'));
 verifyEqual(tc, kpi1_set(), 'fresh3');                                % the deploy commit's switch (docs/d91_deploy.md)
 % B1 on the third set: data/spectrograms_fresh2.mat -> data/splits_fresh2.mat, the training
 % z-score, the second test set's file untouched
@@ -5697,7 +5719,7 @@ function test_drop_step_grid(tc)
 verifyNotEmpty(tc, strfind(fileread(which('train_dqn')), 'DROP_STEPS = CD.drop_steps;'));
 verifyEqual(tc, decision_config().drop_steps, [-2 0 2]);
 verifyNotEmpty(tc, regexp(fileread(which('main')), 'CFG.drop_steps\s*= \[-2 0 2\];', 'once'));
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyNotEmpty(tc, strfind(src, 'MON = Q; if strcmp(Q.deployed, ''rule_sel''), MON = Q.rule_sel; end'));
 verifyNotEmpty(tc, strfind(src, 'PP = decision_settings(PP, MON);'));
 end
@@ -6140,7 +6162,7 @@ for md = {'class_drop', 36; 'class_cusum', 36}'
     verifyTrue(tc, all(h(e0 + 1:end, 1)), md{1});
 end
 verifyEqual(tc, find(event_rows(Pc, [99 101], [NaN e0]))', e0:n);
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyNotEmpty(tc, regexp(src, ['k = event_rows\(P, PP\.runs\{sp\}, K\.ev\{sp\}\);\s*\n[^\n]*flight_of\([^\n]*\n' ...
     '\s*FT\.link_k = FT\.link_k \+ accumarray\(i\(k\), double\(P\.fer\(k\)\), \[nF 1\]\);\s*\n' ...
     '\s*FT\.link_n = FT\.link_n \+ accumarray\(i\(k\), 1, \[nF 1\]\);'], 'once'));
@@ -6199,7 +6221,7 @@ ln = regexp(src, '[^\n]*(?<!\w)monitor\([^\n]*', 'match');      % the local moni
 verifyEqual(tc, numel(ln), 4); verifyTrue(tc, all(contains(ln, {'DROP_MODE', 'drop_mode'})));
 verifyNotEmpty(tc, strfind(fileread(which('choose_drop_threshold')), '''drop_alarm'', ''cusum_db'''));
 verifyNotEmpty(tc, strfind(fileread(which('det_frames')), 'use_drop = any(strcmp(mode, {''class_drop'', ''class_cusum''}));'));
-verifyNotEmpty(tc, strfind(fileread(which('edge_map')), 'RD = pass_cusum(OHP, thr_ohp);'));
+verifyNotEmpty(tc, strfind(src_of('edge_map'), 'RD = pass_cusum(OHP, thr_ohp);'));
 verifyEqual(tc, {drop_unit('class_drop'), drop_unit('class_cusum')}, {'dB', 'dB^2'});
 src = fileread(which('diag_path_loss'));                             % its sweep stays in the deployed form's units
 verifyNotEmpty(tc, strfind(src, 'DD = Dd.THC(j:-1:max(1, j - 2));'));
@@ -6332,7 +6354,7 @@ for q = 1:3
     verifyEqual(tc, [V.alt_m(q), V.k_sig(q), V.rho(q), V.bank(q), V.ds_ns(q)], [d.alt_m, d.k_sig, d.rho, d.bank, d.ds_ns(1)], ...
         'AbsTol', 1e-9);
 end
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyEmpty(tc, strfind(src, 'pool_seed(1, s_(q), blk, r_(q))'));
 verifyNotEmpty(tc, strfind(src, 'V = CT.cov;'));
 src = fileread(which('build_clean_test_pools'));
@@ -6433,7 +6455,7 @@ F.on(:) = true;
 V = surv_layer(F, 'surv', TGT, 200);
 verifyEqual(tc, V.n, 40); verifyEqual(tc, V.value, 0.9);
 verifyEqual(tc, surv_layer(rmfield(F, 'on'), 'surv', TGT, 200).n, 40);
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyNotEmpty(tc, strfind(src, '''harm'', HM(ii), ''on'', K.on(ii)'));
 verifyNotEmpty(tc, strfind(src, '''harm'', hmc(ik), ''on'', Kc.on(ik)'));
 end
@@ -6548,7 +6570,7 @@ end
 function [U, ex] = edge_unknown_block(d, PP) %#ok<INUSD>
 % Runs edge_map.m's read of data/unknown_threat_agents.mat in folder d on the pools PP; ex is
 % the error it stops with (test:none when it ends).
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 k1 = strfind(src, 'U = [];'); k2 = strfind(src, 'if ~isempty(U) || ~startsWith(dep, ''dqn'')');
 assert(isscalar(k1) && isscalar(k2) && k1 < k2, 'test:block', 'edge_map''s read of the agents not found');
 f = fullfile(d, 'em_unknown_block.m');
@@ -6592,7 +6614,7 @@ verifyTrue(tc, status_of(result_status(), 'results/latency.mat').stale);
 LAT = rmfield(LAT, 'det_id'); save('results/latency.mat', 'LAT');
 verifyTrue(tc, status_of(result_status(), 'results/latency.mat').stale);
 verifyFalse(tc, status_of(result_status(), 'results/phy_validation.txt').present);
-src = fileread(which('measure_all_kpis'));
+src = src_of('measure_all_kpis');
 verifyNotEmpty(tc, strfind(src, 'st7 = ''PENDING'''));
 verifyNotEmpty(tc, strfind(src, 'Lt.total_dep_median_ms < 10 && Lt.total_dep_p95_ms < 20'));
 src = fileread(which('measure_latency'));
@@ -6811,7 +6833,7 @@ verifyNotEmpty(tc, strfind(src, 'sets(end+1) = struct(''name'', ''clean2'''));
 verifyNotEmpty(tc, strfind(src, 'RU{pk} = cat_struct(RU{pk}, RES{iC2, pk})'));
 verifyNotEmpty(tc, strfind(src, 'warning(''evaluate_policies:kpi1'''));
 verifyNotEmpty(tc, strfind(src, 'warning(''evaluate_policies:cleanpools'''));
-verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), 'threats with no level inside the envelope'));
+verifyNotEmpty(tc, strfind(src_of('measure_all_kpis'), 'threats with no level inside the envelope'));
 x = [ones(1, 50), zeros(1, 50)]; bin = [ones(1, 50), 2 * ones(1, 50)]; cl = 1:100;
 S = spread_boot(x, bin, cl, 2, 500, 1);
 verifyEqual(tc, S(1), 1); verifyLessThanOrEqual(tc, S(2), 1); verifyEqual(tc, S(3), 1);
@@ -6842,7 +6864,7 @@ end
 function test_hover_label(tc)
 % The hover rows are labelled with the attitude they fly: the tilt and wobble of
 % hover_attitude.m, not calm air.
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyEmpty(tc, strfind(src, 'calm air'));
 verifyNotEmpty(tc, strfind(src, 'p0.wobble_roll_deg, p0.wobble_pitch_deg, p0.wobble_amp_deg, p0.wobble_freq_hz'));
 p = base_params();
@@ -6855,7 +6877,7 @@ function test_episode_cycle_link(tc)
 % out there too.
 src = fileread(which('episode_cycle'));
 verifyNotEmpty(tc, strfind(src, 'obs.cfg_link = prev;'));
-verifyNotEmpty(tc, strfind(fileread(which('demo_gui')), '''cfg_gain_db'', config_gain_db(env.action_names, p0)'));
+verifyNotEmpty(tc, strfind(src_of('demo_gui'), '''cfg_gain_db'', config_gain_db(env.action_names, p0)'));
 end
 
 function test_params_id(tc)
@@ -7082,7 +7104,7 @@ verifyEqual(tc, policy_episodes([1 2], 2, 1:3, 1, false, false, 4, 5, RandStream
 verifyNotEmpty(tc, strfind(fileread(which('build_policy_pools')), 'own = @(Q, sp) ismember(Q.run, runs{sp}(cells(ic).geo{sp}));'));
 verifyNotEmpty(tc, strfind(fileread(which('build_check_pools')), 'own = @(Q) ismember(Q.run, runs(1:N_GEO));'));
 verifyNotEmpty(tc, strfind(fileread(which('choose_drop_threshold')), 'RR = PP.cell_geo{icl}{TR};'));
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyNotEmpty(tc, strfind(src, 'CF = take_rows(FT, FT.c == clean_cell & ismember(FT.sp, SPL) & ~FT.ref);'));
 verifyNotEmpty(tc, strfind(src, 'CS = take_rows(FT, FT.c == clean_cell & FT.sp == SPEED & ~FT.ref);'));
 verifyNotEmpty(tc, strfind(src, 'Fc = take_rows(KF, KF.c == k0 & KF.s == s & ~KF.ref);'));
@@ -7533,7 +7555,7 @@ for s = 1:6
     on(s) = find(F.act > 0, 1);
 end
 verifyTrue(tc, all(on >= 2 & on <= 11)); verifyGreaterThan(tc, numel(unique(on)), 1);
-verifyNotEmpty(tc, strfind(fileread(which('build_threat_model')), 'if fo2 > fo1'));   % no draw at the pools' [1 1]
+verifyNotEmpty(tc, strfind(src_of('build_threat_model'), 'if fo2 > fo1'));   % no draw at the pools' [1 1]
 q = p; q.active_threat = 'airframe_shadowing'; q.shadow_db = 20; q.roll_in_frames = [6 6]; q.cap_frames = 20;
 evalc('build_threat_model(q)');
 set_link_snr(mdl, 12 + 10*log10(q.bits_per_symbol) - 10*log10(q.sps), q);
@@ -8015,7 +8037,7 @@ for f = {'evaluate_policies', 'experiment_unknown_threat', 'experiment_combo_gen
     verifyNotEmpty(tc, regexp(src, 'PPm? = decision_settings\(PPm?, Q\);', 'once'), f{1});
     verifyNotEmpty(tc, strfind(src, '''dec'''), f{1});
 end
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyNotEmpty(tc, strfind(src, 'MON = Q; if strcmp(Q.deployed, ''rule_sel''), MON = Q.rule_sel; end'));
 verifyNotEmpty(tc, strfind(src, 'PP = decision_settings(PP, MON);'));
 verifyNotEmpty(tc, strfind(src, 'CK = decision_settings(CK, PP);'));
@@ -8024,7 +8046,7 @@ for f = {'demo_gui', 'v3d_engine'}
     verifyNotEmpty(tc, regexp(src, 'decision_settings\((env\.)?PP, Q\)', 'once'), f{1});
     verifyNotEmpty(tc, strfind(src, '''maha_thr'', ''dec'''), f{1});
 end
-verifyNotEmpty(tc, strfind(fileread(which('demo_gui')), 'ui.thrSlider.Value = env.unk_retain;'));
+verifyNotEmpty(tc, strfind(src_of('demo_gui'), 'ui.thrSlider.Value = env.unk_retain;'));
 verifyNotEmpty(tc, strfind(fileread(which('policy_decide')), 'PP = decision_settings(PP, opt.monitor);'));
 Q = struct('deployed', 'dqn_esc', 'alarm_mode', 'class_drop', 'confirm', [2 2], 'drop_db', 4, 'det_id', 'x', 'maha_thr', -1, 'dec', S);
 s1 = policy_stamp(Q); Q.dec.rule_mmse_db = 9;
@@ -8366,7 +8388,7 @@ verifyNotEmpty(tc, strfind(ed, 'metrics.sample = fz_read.sample;'));
 verifyLessThan(tc, strfind(ed, 'fz_read = fusion_reading(tag);'), strfind(ed, 'metrics = struct('));
 verifyNotEmpty(tc, strfind(ed, 't_nogo = dir(''data/fusion_nogo.mat'').datenum;'));   % after a no-go the rehearsal follows the record
 verifyNotEmpty(tc, strfind(ed, 'dir(r2).datenum >= max([t_fus, Dt.trained_at, t_nogo])'));
-mk = fileread(which('measure_all_kpis'));
+mk = src_of('measure_all_kpis');
 verifyNotEmpty(tc, strfind(mk, 'm.kpi1_threshold_db, smp(m))'));
 verifyNumElements(tc, strfind(mk, 'smp(ms), ...'), 3);
 verifyNotEmpty(tc, strfind(mk, 'det{end+1} = sprintf(''KPI 1 reading: %s'', read_state(m));'));
@@ -8726,7 +8748,7 @@ verifyEqual(tc, speed_status_word('NOT MET', nc), 'NOT MET');
 verifyEqual(tc, speed_status_word('STALE', nc), 'STALE');
 verifyEqual(tc, speed_status_word('MET', struct()), 'MET');
 verifyEqual(tc, speed_status_word('MET', []), 'MET');
-src = fileread(which('measure_all_kpis'));
+src = src_of('measure_all_kpis');
 verifyNumElements(tc, strfind(src, 'st7 = speed_status_word(st7, P.KP.speed_union);'), 1);
 verifyLessThan(tc, strfind(src, 'st7 = speed_status_word('), strfind(src, 'st7 = ''PENDING'''));
 end
@@ -8886,9 +8908,9 @@ src = fileread(which('evaluate_policies'));
 verifyNotEmpty(tc, strfind(src, 'h = ~(K.restored(ih) & K.restored_plr(ih));'));
 verifyNotEmpty(tc, strfind(src, 'HV = harmed(RV, K);'));
 verifyNotEmpty(tc, strfind(src, '''per_threat_h'', PTh'));
-verifyNotEmpty(tc, strfind(fileread(which('measure_all_kpis')), ...
+verifyNotEmpty(tc, strfind(src_of('measure_all_kpis'), ...
     'ph = P.KP.per_threat_h(:, strcmp(P.KP.show, P.POL{iD})); n_ok = sum(ph >= 50);'));
-src = fileread(which('edge_map'));
+src = src_of('edge_map');
 verifyNotEmpty(tc, strfind(src, 'P.prot_h = held_verdict(F.held_k(h, v), F.ep_n(h, v), F.geo(h), TGT.prot, hf, B);'));
 verifyNotEmpty(tc, strfind(src, 'X.nresp(q, s) = Vn.verdict;'));
 end
@@ -8900,7 +8922,7 @@ Q = struct('agent', struct('k', 1), 'agents', {{struct('k', 2)}}, 'rule_sel', st
 [kind, ag] = policy_setup('dqn', Q, 1, [], [], [], 1);
 verifyEqual(tc, {kind, ag.k}, {'dqn', 1});
 verifyNotEmpty(tc, strfind(fileread(which('evaluate_policies')), 'dep = Q.deployed; if strcmp(dep, ''dqn''), dep = POL{iBase}; end'));
-verifyNotEmpty(tc, strfind(fileread(which('edge_map')), '''dqn'', ''DQN'''));
+verifyNotEmpty(tc, strfind(src_of('edge_map'), '''dqn'', ''DQN'''));
 verifyNotEmpty(tc, strfind(fileread(which('measure_latency')), 'kindD = ''dqn_esc''; if strcmp(dep, ''dqn''), kindD = ''dqn''; end'));
 for f = {'experiment_unknown_threat', 'experiment_combo_generalization'}
     verifyNotEmpty(tc, strfind(fileread(which(f{1})), 'dqn_eval_batches(DK, PP, K, specs, Q.agent'), f{1});
@@ -9198,7 +9220,7 @@ end
 function test_lect_kpis_pending(tc)
 % A policy evaluation saved before the revised proposal's readings shows them as PENDING
 % beside KPI 4 and KPI 5, never as a number.
-src = fileread(which('measure_all_kpis'));
+src = src_of('measure_all_kpis');
 verifyNotEmpty(tc, strfind(src, '''beside KPI 4, PER vs the static link (revised proposal): PENDING, '''));
 verifyNotEmpty(tc, strfind(src, 'save(''results/kpi_summary.mat'', ''KPI'', ''LECT'');'));
 end

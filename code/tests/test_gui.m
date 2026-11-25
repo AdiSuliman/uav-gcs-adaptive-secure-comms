@@ -21,6 +21,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.warn = warning('off', 'MATLAB:load:variableNotFound');         % placeholder files in the exporter tests
@@ -417,7 +418,7 @@ function test_console_source_follows_the_deployed_policy(tc)
 % demo_gui.m runs the deployed kind and never a fixed one: no policy_decide.m call with the literal
 % 'dqn_esc', the checkbox starts at the deployed escalation, the start reads trained_dqn.mat
 % through console_policy.m.
-src = fileread(which('demo_gui'));
+src = src_of('demo_gui');
 verifyEmpty(tc, regexp(src, 'policy_decide\(\s*''dqn', 'once'));
 verifyNotEmpty(tc, regexp(src, 'console_policy\(''load''', 'once'));
 verifyNotEmpty(tc, regexp(src, '''Value'', env\.dep\.esc', 'once'));
