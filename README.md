@@ -241,6 +241,33 @@ An Unreal Engine view of the closed loop, driven from MATLAB (Simulink 3D Animat
 
 ---
 
+## Readings by tag
+
+The book's numbers come from readings run between 19.11 and 25.11.2026. Each reading's code is kept under an annotated tag on the commit that ran it. This line (`asrun-2611-code-line`) merges them. `tools/b1r/b1r_repro.m` (B1-R) reran them from the saved pools with this line's code and compared the outputs with the registered files, on both profiles.
+
+| Reading | Tag of the code that ran it | Reproduced from this line |
+|---|---|---|
+| Profile 1 tree: detector, C2e, KPI summary, D126 latency | `asrun-2511-tree-p1` | yes, by B1-R (`off`, `render`); B1-R replays the tree's own C2e draws |
+| Profile 3 tree: detector, C2e, KPI summary | `asrun-2511-tree-p3` | yes, by B1-R (`off`, `render`) |
+| Profile 1 adopted (rule fix, D126) | `asrun-2511-adopt-p1-d126` | yes, by B1-R (`on`) |
+| Profile 3 adopted rule fix | `asrun-2511-final-line` | yes, by B1-R (`on`) |
+| Profile 3 adopted DQN hop rows (D125, D127) | `asrun-2511-adopt-hop-p3` | no: its stages pin the tree's HEAD; run them from the tag |
+| D125/D127 rule rows reader | `asrun-2511-w19-rulerows` | the reader is on this line, its tests pass; not rerun by B1-R |
+| CORE_BW rule fix | `asrun-2511-core-bw-rule-fix` | yes, by B1-R (`bw`, profile 1) |
+| CORE_BW adopted KPIs (G4) | `asrun-2511-core-bw-g4` | the reader is on this line, its tests pass; not rerun by B1-R. `experiment_core_bw.m` here also prints D121's receiver-robust side line, the additive difference B1-R's `bw` stage shows |
+| System false alarms broken down | `asrun-2511-final-line` | yes, by B1-R (`sysfa`, both profiles) |
+| KPI per Eb/N0 (G5), profile 3 | `asrun-2511-adopt-hop-p3` | `lect_kpis_by_ebno.m` and `lect_kpis.m` on this line are the files it ran; not rerun by B1-R |
+| KPI per Eb/N0 (G5), profile 1 | `asrun-2511-lect-ebno` | no: this line holds the profile 3 reader, which extends profile 1's; run the profile 1 gate from the tag |
+| Lecturer KPI table (463 rows) | built from the frozen sources | its numbers checked against the reproduced files by B1-R (`lect`) |
+| Operator console captures | `asrun-2511-gui-adopt` | the console is on this line, its tests pass |
+| B1-R itself | `asrun-2511-b1r` | the tool is on this line |
+
+Profile 1's C2e draws: on this line `evaluate_policies.m` seeds episode set `si` with `20000 + 1000*si`; profile 1's registered run used `30000 + 100*si`. A plain run of profile 1's C2e from this line therefore draws other episodes. B1-R reproduces the registered numbers because it replays each tree's own draws.
+
+B1-R on this line against the accepted runs of 23-24.11: every row the same on both profiles, except the lecturer table check. That table was rebuilt on 25.11. Its row N442 cites the registered KPI 1 detail line, which this line prints longer, with the same three numbers and every word of the cited line. The check's word-overlap rule calls it missing.
+
+---
+
 ## Decision record
 
 `docs/DECISIONS.md` records every decision with its reason and consequences. The current system rests on:
