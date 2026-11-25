@@ -526,30 +526,51 @@ cache = containers.Map('KeyType', 'char', 'ValueType', 'any');
 V = struct('n', height(T), 'literal', 0, 'derived', 0, 'n_repro', 0, 'repro_missing', 0, 'missing', {{}}, ...
     'reworded', 0, 'reworded_at', {{}});
 for i = 1:height(T)
-    f = char(T.source_file(i)); ln = str2double(T.source_line(i));
+    f = char(T.source_file(i)); cit = char(T.source_line(i));
+    lns = str2double(strsplit(cit, '+'));                        % one line, or several joined by '+'
     nums = {};
     for c = {'value', 'ci_lo', 'ci_hi'}
         x = T.(c{1})(i);
         if ~ismissing(x) && strlength(x) > 0, nums{end+1} = char(x); end %#ok<AGROW>
     end
     L = get_lines(cache, f);
-    if line_has(L, ln, nums), V.literal = V.literal + 1; else, V.derived = V.derived + 1; end
+    ok_cit = all(isfinite(lns) & lns == round(lns) & lns >= 1 & lns <= numel(L));
+    if ok_cit && lines_have(L, lns, nums), V.literal = V.literal + 1; else, V.derived = V.derived + 1; end
     k = norm_path(f);
     if ~isempty(map) && isKey(map, k)
         V.n_repro = V.n_repro + 1;
         R = get_lines(cache, map(k));
-        if ln < 1 || ln > numel(L) || ~any(strcmp(R, L{ln}))
-            cited = ''; if ln >= 1 && ln <= numel(L), cited = L{ln}; end
-            at = reworded_line(R, cited, nums);
-            if ~isempty(nums) && ~isempty(at)
-                V.reworded = V.reworded + 1;
-                V.reworded_at{end+1} = sprintf('%s %s:%d -> line %d', char(T.id(i)), f, ln, at);
-            else
-                V.repro_missing = V.repro_missing + 1;
-                V.missing{end+1} = sprintf('%s %s:%d', char(T.id(i)), f, ln);
-            end
+        if ~ok_cit
+            V.repro_missing = V.repro_missing + 1;
+            V.missing{end+1} = sprintf('%s %s:%s', char(T.id(i)), f, cit);
+            continue
+        end
+        gone = lns(~cellfun(@(x) any(strcmp(R, x)), L(lns)));
+        if isempty(gone), continue; end
+        at = zeros(size(gone));
+        for g = 1:numel(gone)
+            own = nums(cellfun(@(v) line_has(L, gone(g), {v}), nums));   % the row's numbers on this cited line
+            if isempty(own), own = nums; end
+            a = reworded_line(R, L{gone(g)}, own);
+            if ~isempty(own) && ~isempty(a), at(g) = a; end
+        end
+        if all(at > 0)
+            V.reworded = V.reworded + 1;
+            V.reworded_at{end+1} = sprintf('%s %s:%s -> line %s', char(T.id(i)), f, ...
+                strjoin(arrayfun(@num2str, gone, 'UniformOutput', false), '+'), strjoin(arrayfun(@num2str, at, 'UniformOutput', false), '+'));
+        else
+            V.repro_missing = V.repro_missing + 1;
+            V.missing{end+1} = sprintf('%s %s:%s', char(T.id(i)), f, strjoin(arrayfun(@num2str, gone(at == 0), 'UniformOutput', false), '+'));
         end
     end
+end
+end
+
+function ok = lines_have(L, lns, nums)
+% Every number of the row on one of the cited lines.
+ok = true;
+for i = 1:numel(nums)
+    ok = ok && any(arrayfun(@(ln) line_has(L, ln, nums(i)), lns));
 end
 end
 

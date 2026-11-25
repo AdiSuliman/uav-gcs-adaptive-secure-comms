@@ -212,6 +212,22 @@ write(fullfile(d, 'n4.csv'), {'id,value,ci_lo,ci_hi,source_file,source_line', sp
 m4 = containers.Map('KeyType', 'char', 'ValueType', 'char'); m4(lower(src4)) = fullfile(d, 'rep4.txt');
 V = b1r_repro('lect_values', fullfile(d, 'n4.csv'), m4);
 tc.verifyEqual(V.reworded_at, {sprintf('N12 %s:1 -> line 2', src4)});
+% a row cited on two lines ('1+2'): each number on one of them, each line in the reproduced file
+write(fullfile(d, 'src5.txt'), {'goodput 15659 bit/s', 'not recovered 126'});
+src5 = strrep(fullfile(d, 'src5.txt'), '\', '/');
+write(fullfile(d, 'n5.csv'), {'id,value,ci_lo,ci_hi,source_file,source_line', sprintf('N20,15659,126,,%s,1+2', src5), ...
+    sprintf('N21,15659,999,,%s,1+2', src5), sprintf('N22,15659,,,%s,1+x', src5), sprintf('N23,126,,,%s,2+3', src5)});
+V = b1r_repro('lect_values', fullfile(d, 'n5.csv'), containers.Map('KeyType', 'char', 'ValueType', 'char'));
+tc.verifyEqual([V.n V.literal V.derived V.n_repro V.repro_missing], [4 1 3 0 0]);
+write(fullfile(d, 'rep5.txt'), {'x', 'not recovered 126', 'goodput 15659 bit/s'});
+m5 = containers.Map('KeyType', 'char', 'ValueType', 'char'); m5(lower(src5)) = fullfile(d, 'rep5.txt');
+V = b1r_repro('lect_values', fullfile(d, 'n5.csv'), m5);
+tc.verifyEqual([V.n_repro V.reworded V.repro_missing], [4 0 2], 'both cited lines found: N20 and N21 pass; bad citations are missing');
+tc.verifyEqual(V.missing, {sprintf('N22 %s:1+x', src5), sprintf('N23 %s:2+3', src5)});
+write(fullfile(d, 'rep6.txt'), {'goodput 15659 bit/s', 'not recovered 127'});
+m6 = containers.Map('KeyType', 'char', 'ValueType', 'char'); m6(lower(src5)) = fullfile(d, 'rep6.txt');
+V = b1r_repro('lect_values', fullfile(d, 'n5.csv'), m6);
+tc.verifyEqual(V.missing(1:2), {sprintf('N20 %s:2', src5), sprintf('N21 %s:2', src5)}, 'one cited line changed: the row is missing at that line');
 end
 
 %% ---------- refusals ----------
