@@ -13,10 +13,16 @@ function varargout = system_fa_breakdown(cmd, varargin)
 %       out_dir/system_fa_breakdown.gatefail.{txt,mat} (the diagnostics) and stops with
 %       system_fa_breakdown:gate; it creates no reading output, so the reading stays open. The
 %       header names the thread count the session really has.
+%   system_fa_breakdown('run', pools, eval_mat, eval_txt, dqn_mat, out_dir, ref_mat)
+%       The same, the gate additive (a reproduction with later code, b1r_repro.m): ref_mat is the
+%       registered reading's system_fa_breakdown.mat. KP.lect's fields are compared exactly with
+%       this code's lect_kpis.m, the fields only this code holds set aside; the text's lect_kpis
+%       block is compared exactly with the registered reading's G.lect_lines, which must appear in
+%       this code's lines in order. G.added lists what this code adds; a header line says so.
 %       KPI 6's flights follow KP.far_set: without it the union of C2e's clean flights (profile
 %       1); 'fresh' the fresh clean test set RWf alone (P1R's C2e, evaluate_policies.m with
 %       kpi6_set fresh, KP.reading 'P1R', the lecturer lines carrying P1R's label).
-%   G = system_fa_breakdown('gate', E, PP, Q, txt)
+%   G = system_fa_breakdown('gate', E, PP, Q, txt [, ref_lines])   ref_lines: the additive gate
 %       E the variables of eval_mat, Q those of dqn_mat, txt eval_txt one cell per line. G.pass
 %       when lect_kpis.m on every episode gives KP.lect and its lines of txt, far_report on
 %       KPI 6's clean flights gives KP.far, KP.far_diag and their lines, and policy_stamp(Q) is
@@ -39,6 +45,8 @@ function varargout = system_fa_breakdown(cmd, varargin)
 %   [FAR, FD, lines] = system_fa_breakdown('far', RR, POL, LBL, above, T, iDQN, ebno, cls_list, period_ms)
 %       evaluate_policies.m's far_report, byte for byte
 %   h = system_fa_breakdown('sha', f)    SHA-256 of a file, as sha256sum prints it
+%   [a, extra] = system_fa_breakdown('keep_fields', a, b, p)   a without the fields b lacks (additive gate)
+%   [ok, extra] = system_fa_breakdown('in_order', reg, mine)    reg's lines in mine, in order (additive gate)
 switch cmd
     case 'run',          run_reading(varargin{:});
     case 'gate',         varargout{1} = gate(varargin{:});
@@ -54,12 +62,23 @@ switch cmd
     case 'subset',       varargout{1} = subset(varargin{:});
     case 'far',          [varargout{1}, varargout{2}, varargout{3}] = far_report(varargin{:});
     case 'sha',          varargout{1} = file_sha(varargin{:});
+    case 'keep_fields',  [varargout{1}, varargout{2}] = keep_fields(varargin{:});
+    case 'in_order',     [varargout{1}, varargout{2}] = in_order(varargin{:});
     otherwise, error('system_fa_breakdown:cmd', 'system_fa_breakdown: unknown command %s', cmd);
 end
 end
 
 %% ===================== The single run =====================
-function run_reading(pools, eval_mat, eval_txt, dqn_mat, out_dir)
+function run_reading(pools, eval_mat, eval_txt, dqn_mat, out_dir, ref_mat)
+if nargin < 6, ref_mat = ''; end
+ref_lines = [];
+if ~isempty(ref_mat)
+    assert(is_abs(ref_mat) && isfile(ref_mat), 'system_fa_breakdown:input', '%s: not an absolute path of a file', ref_mat);
+    Lr = load(ref_mat, 'G');
+    assert(isfield(Lr, 'G') && isfield(Lr.G, 'lect_lines') && ~isempty(Lr.G.lect_lines), 'system_fa_breakdown:input', ...
+        '%s holds no G.lect_lines', ref_mat);
+    ref_lines = Lr.G.lect_lines; clear Lr
+end
 for f = {pools, eval_mat, eval_txt, dqn_mat}
     assert(is_abs(f{1}) && isfile(f{1}), 'system_fa_breakdown:input', '%s: not an absolute path of a file', f{1});
 end
@@ -107,7 +126,11 @@ if fresh
         'D103 4 and 5 read test pools already read in profile 1''s C2e (second reading, descriptive)'], ...
         char(string(field_or(E.KP, 'far_src', '?'))));
 end
-G = gate(E, PP, Q, txt);
+G = gate(E, PP, Q, txt, ref_lines);
+if ~isempty(ref_mat)
+    head{end+1} = sprintf(['additive gate against %s: KP.lect''s fields and the registered lect_kpis lines compared ' ...
+        'exactly; this code adds %d fields and %d lines (G.added)'], ref_mat, numel(G.added.fields), numel(G.added.lines));
+end
 if ~G.pass
     lines = [{sprintf('GATE FAIL (%d mismatches): nothing of D103 3-5 is read; no reading output was written, the reading stays open', ...
         numel(G.mismatch))}, head, G.mismatch];
@@ -140,7 +163,8 @@ end
 end
 
 %% ===================== Gate =====================
-function G = gate(E, PP, Q, txt)
+function G = gate(E, PP, Q, txt, ref_lines)
+if nargin < 5, ref_lines = []; end
 G = struct('pass', false, 'mismatch', {{}}, 'lect', [], 'lect_lines', {{}}, 'far', [], 'far_diag', [], ...
     'far_lines', {{}}, 'T', NaN, 'RU', {{}}, 'aboveU', [], 'mon', [], 'p6', [], 'cmp', []);
 txt = norm_lines(txt);
@@ -176,12 +200,22 @@ if ~isempty(mm), G.mismatch = mm; return; end
 [Lf, lf] = lect_kpis(E.ALL, E.POL, E.LBL, E.iDQN, PP.scen, KP.lect.payload_bps, KP.lect.period_ms, rr_call(KP.lect));
 lf = norm_lines(lf);
 if fresh, lf = p1r_label(lf); end
-mm = [mm, differs(Lf, KP.lect, 'lect_kpis on every episode vs KP.lect')];
-i = find(strcmp(txt, lf{2}));
+if isempty(ref_lines)
+    mm = [mm, differs(Lf, KP.lect, 'lect_kpis on every episode vs KP.lect')];
+    blk = lf;
+else
+    [Ls, af] = keep_fields(Lf, KP.lect, 'lect');
+    mm = [mm, differs(Ls, KP.lect, 'lect_kpis on every episode, KP.lect''s fields, vs KP.lect')];
+    blk = reshape(norm_lines(ref_lines), 1, []);
+    [ok, al] = in_order(blk, reshape(lf, 1, []));
+    G.added = struct('fields', {af}, 'lines', {al});     % only in the additive gate: the default G is unchanged
+    if ~ok, mm{end+1} = 'the registered lect_kpis lines are not all in this code''s lines, in order'; end
+end
+i = find(strcmp(txt, blk{2}));
 if numel(i) ~= 1
     mm{end+1} = sprintf('the text holds lect_kpis''s header %d times, not once', numel(i));
 else
-    mm = [mm, block_diff(txt, lf, i - 1, 'lect_kpis''s lines')];
+    mm = [mm, block_diff(txt, blk, i - 1, 'lect_kpis''s lines')];
 end
 
 % far_report on KPI 6's clean flights: KP.far, KP.far_diag and their lines
@@ -381,6 +415,31 @@ try
 catch ME                                            % the diagnostics never replace the gate's own answer
     d{end+1} = sprintf('    leaf: the diagnostics failed: %s', ME.message);
 end
+end
+
+function [a, extra] = keep_fields(a, b, p)
+% a without the fields b lacks, at every depth where both are structs of one size; extra their paths.
+extra = {};
+if ~(isstruct(a) && isstruct(b) && isequal(size(a), size(b))), return; end
+fx = setdiff(fieldnames(a), fieldnames(b), 'stable');
+extra = strcat(p, '.', fx(:)');
+if ~isempty(fx), a = rmfield(a, fx); end
+for f = fieldnames(a)'
+    for i = 1:numel(a)
+        q = [p '.' f{1}]; if numel(a) > 1, q = sprintf('%s(%d).%s', p, i, f{1}); end
+        [a(i).(f{1}), e] = keep_fields(a(i).(f{1}), b(i).(f{1}), q);
+        extra = [extra, e]; %#ok<AGROW>
+    end
+end
+end
+
+function [ok, extra] = in_order(reg, mine)
+% Every line of reg in mine, in order (greedy); extra the lines of mine left between them.
+j = 1; keep = false(size(mine));
+for k = 1:numel(mine)
+    if j <= numel(reg) && strcmp(mine{k}, reg{j}), keep(k) = true; j = j + 1; end
+end
+ok = j > numel(reg); extra = mine(~keep);
 end
 
 function d = leaf_diff(a, b, p, maxn)

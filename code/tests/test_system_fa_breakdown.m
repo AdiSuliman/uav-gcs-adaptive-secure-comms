@@ -53,6 +53,50 @@ P2 = PP; P2.ebno = [0 3 7];
 gate_fails(tc, E, P2, Q, txt, 'Eb/N0 grid');
 end
 
+function test_gate_additive(tc)
+% A reproduction with later code: the registered KP.lect lacks a field and the registered text a
+% line this code prints. The exact gate stops; the additive gate passes on the registered fields
+% and lines, lists what this code adds, and still stops on a changed value or a changed line.
+[E, PP, txt, Q] = eval_world();
+G = system_fa_breakdown('gate', E, PP, Q, txt);
+verifyTrue(tc, G.pass, strjoin(G.mismatch, newline));
+ll = G.lect_lines;
+keep = {'payload_bps', 'period_ms', 'rr', 'core'};                % what the gate's own call reads
+fn = setdiff(fieldnames(E.KP.lect), keep, 'stable'); fn = fn{end};
+X = E; X.KP.lect = rmfield(X.KP.lect, fn);
+i0 = find(strcmp(txt, ll{2})) - 1; drop = 4;
+t = txt; t(i0 + drop - 1) = [];
+reg = ll; reg(drop) = [];
+gate_fails(tc, X, PP, Q, t, 'lect_kpis on every episode vs KP.lect');
+G = system_fa_breakdown('gate', X, PP, Q, t, reg);
+verifyTrue(tc, G.pass, strjoin(G.mismatch, newline));
+verifyEqual(tc, G.added.fields, {['lect.' fn]});
+verifyEqual(tc, G.added.lines, ll(drop));
+verifyEqual(tc, G.lect_lines, ll, 'the readings go on with this code''s lines');
+G0 = system_fa_breakdown('gate', E, PP, Q, txt);
+verifyFalse(tc, isfield(G0, 'added'), 'the default gate''s G is unchanged');
+Y = X; f2 = setdiff(fieldnames(Y.KP.lect), [keep, {fn}], 'stable');
+k = find(cellfun(@(f) isnumeric(Y.KP.lect.(f)) && ~isempty(Y.KP.lect.(f)), f2), 1);
+if ~isempty(k)
+    v = Y.KP.lect.(f2{k}); v(1) = v(1) + 1; Y.KP.lect.(f2{k}) = v;
+    G = system_fa_breakdown('gate', Y, PP, Q, t, reg);
+    verifyFalse(tc, G.pass); verifyTrue(tc, any(contains(G.mismatch, 'KP.lect''s fields, vs KP.lect')));
+end
+t2 = t; t2{i0 + 5} = [t2{i0 + 5} ' changed']; reg2 = reg; reg2{6} = t2{i0 + 5};
+G = system_fa_breakdown('gate', X, PP, Q, t2, reg2);
+verifyFalse(tc, G.pass);
+verifyTrue(tc, any(contains(G.mismatch, 'not all in this code''s lines, in order')));
+G = system_fa_breakdown('gate', X, PP, Q, t2, reg);
+verifyFalse(tc, G.pass);
+verifyTrue(tc, any(contains(G.mismatch, 'lect_kpis''s lines: first difference')));
+[a, ex] = system_fa_breakdown('keep_fields', struct('x', 1, 'y', struct('p', 1, 'q', 2)), struct('x', 1, 'y', struct('p', 1)), 'S');
+verifyEqual(tc, a, struct('x', 1, 'y', struct('p', 1))); verifyEqual(tc, ex, {'S.y.q'});
+[ok, ex] = system_fa_breakdown('in_order', {'a', 'c'}, {'a', 'b', 'c'});
+verifyTrue(tc, ok); verifyEqual(tc, ex, {'b'});
+ok = system_fa_breakdown('in_order', {'c', 'a'}, {'a', 'b', 'c'});
+verifyFalse(tc, ok);
+end
+
 function test_monitors(tc)
 % Every policy runs the trained policy's monitor, the rule fallback its own on top; without
 % settings policy_monitor.m's defaults (no sweeper path).
