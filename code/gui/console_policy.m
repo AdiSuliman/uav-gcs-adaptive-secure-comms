@@ -41,6 +41,10 @@ function varargout = console_policy(cmd, varargin)
 %   s = console_policy('kpi_note', A, has_note)
 %       the footnote of the KPI tab: has_note true when the bundle holds results/adoption_note.txt;
 %       '' when A is off.
+%   H = console_policy('lat_head', Lt)
+%       KPI 7's cycle latency from LAT (measure_latency.m): the deployed chain (H.med, H.p95 in ms,
+%       H.chain); a latency without the deployed chain falls back to the DQN chain, as
+%       measure_all_kpis.m reads it.
 switch cmd
     case 'load',     varargout{1} = load_deployed(varargin{:});
     case 'deployed', varargout{1} = deployed_of(varargin{:});
@@ -52,6 +56,7 @@ switch cmd
     case 'adopt_ctx', varargout{1} = adopt_ctx(varargin{:});
     case 'adopt_line', varargout{1} = adopt_line(varargin{:});
     case 'kpi_note',  varargout{1} = kpi_note(varargin{:});
+    case 'lat_head',  varargout{1} = lat_head(varargin{:});
     otherwise, error('console_policy:cmd', 'console_policy: unknown command %s', cmd);
 end
 end
@@ -179,5 +184,13 @@ if has_note
     s = 'KPI numbers: adopted reading (results/adoption_note.txt)';
 else
     s = 'KPI numbers: registered reading, without the adopted settings the live decisions use';
+end
+end
+
+function H = lat_head(Lt)
+if isfield(Lt, 'total_dep_median_ms')
+    H = struct('med', Lt.total_dep_median_ms, 'p95', Lt.total_dep_p95_ms, 'chain', 'deployed chain');
+else
+    H = struct('med', Lt.total_dqn_median_ms, 'p95', Lt.total_dqn_p95_ms, 'chain', 'DQN chain');
 end
 end

@@ -204,11 +204,37 @@ verifyEqual(tc, console_policy('kpi_note', A, false), ...
     'KPI numbers: registered reading, without the adopted settings the live decisions use');
 end
 
+function test_lat_head(tc)
+L = struct('total_dqn_median_ms', 8.046, 'total_dqn_p95_ms', 10.556, 'total_dep_median_ms', 8.62, ...
+    'total_dep_p95_ms', 11.134, 'device', 'CPU');
+H = console_policy('lat_head', L);
+verifyEqual(tc, [H.med H.p95], [8.62 11.134]); verifyEqual(tc, H.chain, 'deployed chain');
+H = console_policy('lat_head', rmfield(L, {'total_dep_median_ms', 'total_dep_p95_ms'}));
+verifyEqual(tc, [H.med H.p95], [8.046 10.556]); verifyEqual(tc, H.chain, 'DQN chain');
+end
+
+function test_lat_head_is_kpi7(tc)
+% the KPI 7 card equals the kpi_summary.txt headline of each adopted root
+W = fullfile(fileparts(tc.TestData.root), '');
+roots = {fullfile(W, 'adopt-p1-d126', 'results', 'rule_fix', 'p1', 'adopted', 'on', 'results'), ...
+    fullfile(W, 'adopt-hop-p3', 'results', 'dqn_hop', 'p3', 'adopted', 'on', 'results')};
+roots = roots(cellfun(@(r) isfile(fullfile(r, 'latency.mat')) && isfile(fullfile(r, 'kpi_summary.txt')), roots));
+assumeNotEmpty(tc, roots, 'no adopted root beside this checkout');
+for r = roots
+    L = load(fullfile(r{1}, 'latency.mat'), 'LAT'); H = console_policy('lat_head', L.LAT);
+    k = regexp(fileread(fullfile(r{1}, 'kpi_summary.txt')), 'KPI 7 [^
+]*?median ([\d.]+) ms, p95 ([\d.]+) ms', 'tokens', 'once');
+    verifyEqual(tc, sprintf('%.2f/%.2f', H.med, H.p95), sprintf('%s/%s', k{1}, k{2}), r{1});
+end
+end
+
 function test_console_wires_the_lines(tc)
 src = strrep(fileread(which('demo_gui')), char(13), '');
 verifyNotEmpty(tc, strfind(src, 'console_policy(''adopt_line'', env.adopt)'));
 verifyNotEmpty(tc, strfind(src, 'console_policy(''kpi_note'', env.adopt, isfile(''results/adoption_note.txt''))'));
 verifyNotEmpty(tc, strfind(src, 'decRows = {''1x'', 68}; if ~isempty(adoptTxt)'));   % off: the two-row layout as it was
+verifyEqual(tc, numel(strfind(src, 'console_policy(''lat_head'', Lt)')), 2);            % the KPI 7 card and the latency plot
+verifyEmpty(tc, strfind(src, 'Lt.total_dqn_median_ms'));
 end
 
 function test_export_copies_the_adoption_note(tc)

@@ -2755,8 +2755,9 @@ function loadKpiTab(fig)
             max(pv), P.KP.speed_bins(1), P.KP.speed_bins(end)), col);
     end
     if ~isempty(Lt)
-        setCard(ui, 3, sprintf('%.1f ms', Lt.total_dqn_median_ms), sprintf('median per cycle | p95 %.1f ms | %s', ...
-            Lt.total_dqn_p95_ms, Lt.device), c.accent);
+        H = console_policy('lat_head', Lt);
+        setCard(ui, 3, sprintf('%.2f ms', H.med), sprintf('median per cycle, %s | p95 %.2f ms | %s', ...
+            H.chain, H.p95, Lt.device), c.accent);
     end
     if ~isempty(Kp)
         appLog(fig, sprintf('KPI summary: %s', strjoin(arrayfun(@(q) sprintf('%d %s', q.id, q.status), Kp, ...
@@ -2873,8 +2874,8 @@ function ok = plotLatency(ax, Lt, c)
     ax.XTick = 1:numel(Lt.names); ax.XTickLabel = Lt.names; ax.XTickLabelRotation = 30;
     ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, 'ms', 'Color', c.mut);
     legend(ax, {'median', 'p95'}, 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 8);
-    setTitle(ax, sprintf('Latency per cycle: %.2f ms median, %.2f ms p95', Lt.total_dqn_median_ms, ...
-        Lt.total_dqn_p95_ms), c);
+    H = console_policy('lat_head', Lt);
+    setTitle(ax, sprintf('Latency per cycle, %s: %.2f ms median, %.2f ms p95', H.chain, H.med, H.p95), c);
 end
 
 function ok = plotActions(ax, P, c)
