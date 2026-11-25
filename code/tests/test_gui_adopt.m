@@ -222,8 +222,7 @@ roots = roots(cellfun(@(r) isfile(fullfile(r, 'latency.mat')) && isfile(fullfile
 assumeNotEmpty(tc, roots, 'no adopted root beside this checkout');
 for r = roots
     L = load(fullfile(r{1}, 'latency.mat'), 'LAT'); H = console_policy('lat_head', L.LAT);
-    k = regexp(fileread(fullfile(r{1}, 'kpi_summary.txt')), 'KPI 7 [^
-]*?median ([\d.]+) ms, p95 ([\d.]+) ms', 'tokens', 'once');
+    k = regexp(fileread(fullfile(r{1}, 'kpi_summary.txt')), 'KPI 7 [^\n]*?median ([\d.]+) ms, p95 ([\d.]+) ms', 'tokens', 'once');
     verifyEqual(tc, sprintf('%.2f/%.2f', H.med, H.p95), sprintf('%s/%s', k{1}, k{2}), r{1});
 end
 end
