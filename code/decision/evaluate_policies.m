@@ -88,6 +88,8 @@ Q = load('data/trained_dqn.mat', 'agent', 'agents', 'gammas', 'H', 'seed_summary
     'deployed', 'rule_sel', 'det_id', 'maha_thr', 'dec');
 check_det_id(PP, Q, 'evaluate_policies');
 PP = decision_settings(PP, Q);                       % the deployed DQN's monitor and settings for every policy but the rule fallback
+cfgA = []; if exist('CFG', 'var'), cfgA = CFG; end
+ADP = adopt_options(cfgA);                           % adopted settings (CFG.adopt, adopt_options.m), off by default
 K = link_env('tables', PP);
 C = decision_config();
 tab = policy_table(PP, K);
@@ -193,6 +195,7 @@ t0 = tic;
 for si = 1:numel(sets)
     for pk = 1:numel(POL)
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+        opt = adopt_options('opt', ADP, POL{pk}, opt);
         RES{si, pk} = policy_run_set(kind, PP, K, sets(si).spec, sets(si).split, ag, opt, 30000 + 100*si);
     end
     fprintf('  set %-9s %5d episodes x %d policies (%.1f min)\n', sets(si).name, numel(RES{si, 1}.ret), ...
@@ -209,6 +212,7 @@ vsets = {policy_episodes(single_cells, nS, G(single_cells, VAL), REPS, false, fa
          policy_episodes(foll_cells, nS, G(foll_cells, VAL), REPS, true, false, NE, T, rs), ...
          policy_episodes(combo_cells, nS, G(combo_cells, VAL), REPS, false, false, NE, T, rs)};
 [kind, ag, opt] = policy_setup(POL{iDQN}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+opt = adopt_options('opt', ADP, POL{iDQN}, opt);
 RV = policy_run_set(kind, PP, K, vsets{1}, VAL, ag, opt, 70000);
 for vs = 2:3, RV = cat_struct(RV, policy_run_set(kind, PP, K, vsets{vs}, VAL, ag, opt, 70000 + 100*vs)); end
 fprintf('  envelope (validation) %d episodes (%.1f min)\n', numel(RV.ret), toc(t0)/60);
@@ -231,6 +235,7 @@ rep{end+1} = sprintf(['Selected DQN: gamma %.2f, training false-switch penalty %
     'flights in test. ' ...
     'Intervals: 95%% bootstrap over geometries.'], ...
     Q.seed_summary.selected_gamma, Q.seed_summary.selected_fa_pen, PP.alarm_mode, PP.confirm, numel(PP.combos));
+if ADP.on, rep{end+1} = adopt_options('note', ADP); end
 for si = find(~strcmp({sets.name}, 'offset'))
     rep{end+1} = ''; %#ok<SAGROW>
     R1 = RES{si, 1};
@@ -492,6 +497,7 @@ if isfile('data/clean_test_pools.mat')
     RW = cell(1, numel(POL));
     for pk = 1:numel(POL)
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, fixed_best, fixed_mmse, tab, K.na);
+        opt = adopt_options('opt', ADP, POL{pk}, opt);
         R = policy_run_set(kind, PPw, Kw, specs, TEST, ag, opt, 40000);
         f = fieldnames(R);
         for j = 1:numel(f), R.(f{j}) = R.(f{j})(:, 1:n); end        % drop the padding
