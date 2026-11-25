@@ -80,8 +80,11 @@ for n = {'none', 'random', 'fixed', 'fixed_mmse', 'table', 'table_relm', 'table_
     end
 end
 verifyError(tc, @() adopt_options(struct('adopt', struct('rule_fx', 'keep'))), 'adopt_options:name');
-verifyError(tc, @() adopt_options(struct('adopt', struct('dqn_hop', 'q'))), 'adopt_options:dqn_hop');
-verifyError(tc, @() adopt_options(struct('adopt', struct('rule_fix', 'keep', 'dqn_hop', 'rule'))), 'adopt_options:dqn_hop');
+A2 = adopt_options(struct('adopt', struct('dqn_hop', 'q')));
+verifyEqual(tc, {A2.on, A2.dqn_hop, A2.names, A2.rule_fix}, {true, 'q', {'dqn_hop'}, ''});
+A2 = adopt_options(struct('adopt', struct('rule_fix', 'keep', 'dqn_hop', "rule")));
+verifyEqual(tc, {A2.dqn_hop, A2.names}, {'rule', {'rule_fix', 'dqn_hop'}});
+verifyError(tc, @() adopt_options(struct('adopt', struct('dqn_hop', 'fec'))), 'dqn_fix:token');
 verifyError(tc, @() adopt_options(struct('adopt', 'keep')), 'adopt_options:value');
 verifyError(tc, @() adopt_options(struct('adopt', struct('rule_fix', 'keep+notch'))), 'rule_fix:token');
 verifyEqual(tc, adopt_options('names'), {'rule_fix', 'dqn_hop'});
@@ -522,7 +525,7 @@ verifyEqual(tc, adopt_options(C).rule_fix, 'keep+st+rate');
 M.adoptions = struct('name', {'dqn_hop', 'rule_fix'}, 'setting', {'q', 'keep+st+rate'});
 verifyError(tc, @() adopt_reading('cfg', M), 'adopt_reading:order');
 M.adoptions = struct('name', {'rule_fix', 'dqn_hop'}, 'setting', {'keep+st+rate', 'q'});
-verifyError(tc, @() adopt_reading('cfg', M), 'adopt_options:dqn_hop');    % the order is accepted, the layer is not here
+verifyEqual(tc, adopt_reading('cfg', M).adopt, struct('rule_fix', 'keep+st+rate', 'dqn_hop', 'q'));
 M.adoptions = struct('name', {'rule_fix', 'other'}, 'setting', {'keep+st+rate', 'x'});
 verifyError(tc, @() adopt_reading('cfg', M), 'adopt_reading:order');
 M.adoptions = {struct('name', 'rule_fix', 'setting', 'keep')};    % a list of differing objects decodes to a cell

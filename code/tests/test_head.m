@@ -328,6 +328,9 @@ end
 function test_candidates_match_direct_fits(tc)
 % A reading is the fit on the other folds: B's equals select_fusion.m's out-of-fold columns;
 % the head's level-0 inputs come from fits without the read fold.
+% One thread: with several, BLAS splits differently shaped products differently, and equal fits
+% differ in the last bits (test_candidates_rounding_only bounds that difference).
+n0 = maxNumCompThreads(1); c0 = onCleanup(@() maxNumCompThreads(n0)); %#ok<NASGU>
 X = tc.TestData.X; D = data_of(X, X.yt, '');
 Z = [X.Z0, X.XB]; te = X.fold == 1; tr = ~te;
 FM = fuse_classes('fit', Z(tr, :), X.yt(tr), X.C, 1e-3);
@@ -347,6 +350,30 @@ verifyTrue(tc, isequal(pc(te, :), P)); verifyTrue(tc, all(isnan(pc(X.fold == 2, 
 q = fusion_cand('oof', D, 'B', 2, 1);                    % inside outer fold 1: fold 2 read by the fit without folds 1 and 2
 m = ~ismember(X.fold, [1 2]);
 verifyTrue(tc, isequal(q(X.fold == 2, :), fuse_classes('apply', fuse_classes('fit', Z(m, :), X.yt(m), X.C, 1e-3), Z(X.fold == 2, :))));
+end
+
+function test_candidates_rounding_only(tc)
+% At the session's own thread count the candidate's readings and the direct fits agree to
+% rounding (multithreaded: up to about 1e-15): the same NaN pattern, values within 1e-9.
+X = tc.TestData.X; D = data_of(X, X.yt, '');
+Z = [X.Z0, X.XB]; te = X.fold == 1; tr = ~te;
+FM = fuse_classes('fit', Z(tr, :), X.yt(tr), X.C, 1e-3);
+po = nan(size(Z, 1), X.C);
+for j = 2:5
+    m = ~ismember(X.fold, [1 j]);
+    po(X.fold == j, :) = fuse_classes('apply', fuse_classes('fit', Z(m, :), X.yt(m), X.C, 1e-3), Z(X.fold == j, :));
+end
+L = fuse_head('classes', X.classes);
+H = fuse_head('fit', po(tr, :), Z(tr, :), X.yt(tr), L, fuse_head('cols', X.C, X.PK.cues), fuse_head('seed', 'LBH', 1));
+a = fusion_cand('pred', D, 'LBH', 1); b = fuse_head('apply', H, fuse_classes('apply', FM, Z(te, :)), Z(te, :));
+verifyEqual(tc, size(a), size(b));
+verifyEqual(tc, isnan(a), isnan(b));
+verifyEqual(tc, a, b, 'AbsTol', 1e-9);
+verifyEqual(tc, fusion_cand('head', D, 'LBH', 1), H, 'AbsTol', 1e-9);
+m = ~ismember(X.fold, [1 2]); q = fusion_cand('oof', D, 'B', 2, 1);
+q2 = fuse_classes('apply', fuse_classes('fit', Z(m, :), X.yt(m), X.C, 1e-3), Z(X.fold == 2, :));
+verifyEqual(tc, isnan(q(X.fold == 2, :)), isnan(q2));
+verifyEqual(tc, q(X.fold == 2, :), q2, 'AbsTol', 1e-9);
 end
 
 function test_candidates_no_leak(tc)

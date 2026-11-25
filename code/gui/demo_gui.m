@@ -89,6 +89,8 @@ env.class_list = cellstr(D.classes(:));
 env.classes    = D.classes;
 env.dqn_agent  = Q.agent;
 env.dep        = dep;
+env.adopt      = console_policy('adopt', 'profile.json');   % the bundle's adopted settings; off when it names none
+if env.adopt.on, fprintf('  %s\n', console_policy('adopt_line', env.adopt)); end
 env.feat_mean  = featMean;
 env.feat_std   = featStd;
 env.p0         = p0;
@@ -159,6 +161,7 @@ c.mono    = 'Consolas';
 
 fig = uifigure('Name', 'UAV-GCS Adaptive Secure Communications - Operator Console', ...
     'Visible', get(groot, 'DefaultFigureVisible'), 'Position', [20 20 1680 940], 'Color', c.bg);
+try, fig.Theme = 'dark'; fig.Color = c.bg; catch, end %#ok<CTCH>   % dark tab strip, table header and menus where MATLAB supports it
 
 root = uigridlayout(fig, [2 1]);
 root.RowHeight = {54, '1x'}; root.Padding = [8 8 8 8]; root.RowSpacing = 6;
@@ -168,13 +171,14 @@ root.BackgroundColor = c.bg;
 hdr = uipanel(root, 'BackgroundColor', c.panelBg, 'BorderType', 'none');
 hdr.Layout.Row = 1;
 hg = uigridlayout(hdr, [1 5]);
-hg.ColumnWidth = {'1x', 530, 200, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
+hg.ColumnWidth = {'1x', 640, 200, 30, 270}; hg.Padding = [14 4 14 4]; hg.BackgroundColor = c.panelBg;
 place(mkLabel(hg, 'UAV-GCS ADAPTIVE SECURE COMMUNICATIONS', c, 'FontSize', 17, 'FontWeight', 'bold'), 1, 1);
-place(mkLabel(hg, sprintf('CNN %d-class detector | %d configurations | deployed: %s | %d UAV antennas | %s | %.1f GHz', ...
+place(mkLabel(hg, sprintf('CNN %d-class | %d configurations | deployed: %s | %d UAV antennas | %s | %.1f GHz', ...
     numel(env.class_list), numel(env.action_names), env.dep.short, p0.n_rx, kText(p0), p0.carrier_freq / 1e9), c, ...
     'FontColor', c.mut, 'FontSize', 11, 'HorizontalAlignment', 'right'), 1, 2);
 [pItems, pData] = profileMenu(p0.n_rx, profile);
 pMenu = uidropdown(hg, 'Items', pItems, 'ItemsData', pData, 'Value', profile, 'FontName', c.font, ...
+    'BackgroundColor', c.termBg, 'FontColor', c.txt, ...
     'Tooltip', 'UAV antennas: switch to the trained system of another antenna profile', ...
     'ValueChangedFcn', @(s, ~) switchProfile(s, profile));
 pMenu.Layout.Row = 1; pMenu.Layout.Column = 3;
@@ -452,10 +456,16 @@ function ui = buildLiveTab(tab, env, c)
 
     % ---- Decision ----
     pDec = mkPanel(gr, sprintf('4 - DECISION  (%s, rule-based, core rule)', env.dep.name), c); pDec.Layout.Row = 2;
-    gDec = uigridlayout(pDec, [2 1]); gDec.RowHeight = {'1x', 68};
+    adoptTxt = console_policy('adopt_line', env.adopt);
+    decRows = {'1x', 68}; if ~isempty(adoptTxt), decRows = {'1x', 16, 68}; end
+    gDec = uigridlayout(pDec, [numel(decRows) 1]); gDec.RowHeight = decRows;
     gDec.Padding = [8 4 8 6]; gDec.RowSpacing = 3; gDec.BackgroundColor = c.panelBg;
     qAx = place(uiaxes(gDec), 1, 1); styleAx(qAx, c);
-    decLbl = place(mkLabel(gDec, {'-'}, c, 'FontSize', 12, 'FontName', c.mono, 'VerticalAlignment', 'top'), 2, 1);
+    if ~isempty(adoptTxt)
+        place(mkLabel(gDec, adoptTxt, c, 'FontSize', 10, 'FontColor', c.cyan, 'Tooltip', ...
+            'Settings adopted for this bundle (profile.json): the console decides with them.'), 2, 1);
+    end
+    decLbl = place(mkLabel(gDec, {'-'}, c, 'FontSize', 12, 'FontName', c.mono, 'VerticalAlignment', 'top'), numel(decRows), 1);
 
     % ---- Outcome ----
     pOut = mkPanel(gr, '5 - OUTCOME  (mean BER over all valid frames)', c); pOut.Layout.Row = 3;
@@ -523,7 +533,7 @@ function ui = buildEpisodeTab(tab, env, c)
         'used yet in this incident. Rescues wrong first picks, at the price of extra switching.', ...
         ternaryStr(env.dep.esc, 'The deployed policy runs with it (default on).', ...
             'The deployed policy runs WITHOUT it (default off); switching it on shows a variant that is not deployed.')};
-    tipConf = {sprintf('Trigger discipline: the attack must be seen on %d of the last %d cycles', cf(1), cf(2)), ...
+    tipConf = {sprintf('Class alarm - trigger discipline: the attack must be seen on %d of the last %d cycles', cf(1), cf(2)), ...
         'before ANY response may fire. One noisy frame never causes a switch -', ...
         sprintf('this is why reactions take at least %d cycles and false alarms are rare.', cf(1))};
     tipDwell = {'The rule policy''s own patience: it commits a new response only', ...
@@ -575,7 +585,7 @@ function ui = buildEpisodeTab(tab, env, c)
     epHystChk = place(uicheckbox(gl, 'Text', ['Escalation (deployed: ' ternaryStr(env.dep.esc, 'on', 'off') ')'], 'Value', env.dep.esc, ...
         'Tooltip', tipHyst, 'FontColor', c.txt, 'FontName', c.font), 9, [1 3]);
     helpMark(gl, 9, 4, tipHyst, c);
-    epDwellSpin = place(mkLabel(gl, sprintf('alarm confirmation %d-of-%d', confirmOf(env)), c, 'FontColor', c.mut, ...
+    epDwellSpin = place(mkLabel(gl, sprintf('class alarm %d-of-%d', confirmOf(env)), c, 'FontColor', c.mut, ...
         'FontSize', 10, 'Tooltip', tipConf), 10, 1);
     helpMark(gl, 10, 2, tipConf, c);
     epHoldSpin  = place(mkLabel(gl, sprintf('rule: dwell %d, hold %d', DC.dwell, DC.hold), c, 'FontColor', c.mut, 'FontSize', 10, ...
@@ -635,7 +645,9 @@ end
 %% =========================  BUILD: KPI TAB  ===========================
 %% =====================================================================
 function ui = buildKpiTab(tab, env, c)
-    g = uigridlayout(tab, [4 1]); g.RowHeight = {112, '1x', '1x', 128}; g.Padding = [4 4 4 4];
+    kpiNote = console_policy('kpi_note', env.adopt, isfile('results/adoption_note.txt'));
+    kRows = {112, '1x', '1x', 128}; if ~isempty(kpiNote), kRows{end+1} = 16; end
+    g = uigridlayout(tab, [numel(kRows) 1]); g.RowHeight = kRows; g.Padding = [4 4 4 4];
     g.RowSpacing = 8; g.BackgroundColor = c.bg;
 
     top = uigridlayout(g, [1 7]); top.Layout.Row = 1; top.ColumnWidth = {'1x','1x','1x','1x','1x','1x',110};
@@ -686,6 +698,10 @@ function ui = buildKpiTab(tab, env, c)
     gL = uigridlayout(pL, [1 1]); gL.Padding = [6 2 6 6]; gL.BackgroundColor = c.panelBg;
     kLect = uitextarea(gL, 'Value', {'-'}, 'Editable', 'off', 'FontName', c.mono, 'FontSize', 10, ...
         'BackgroundColor', c.termBg, 'FontColor', c.txt);
+
+    if ~isempty(kpiNote)
+        place(mkLabel(g, kpiNote, c, 'FontSize', 10, 'FontColor', c.mut), 5, 1);
+    end
 
     ui = struct('kpiVal',kpiVal,'kpiSub',kpiSub,'kpiRefreshBtn',kpiRefreshBtn, ...
         'kCm',kCm,'kAcc',kAcc,'kRec',kRec,'kLat',kLat,'kAct',kAct,'kSpd',kSpd,'kLect',kLect);
@@ -746,8 +762,8 @@ function ui = buildLogTab(tab, env, c)
     hdrNames = {'#','Threat','Eb/N0','Speed','Severity','Detected','Conf',[dn ' action'],'Rule action', ...
                 ['Rec ' dn],'Rec Rule','Verdict','Lat (ms)'};
     histTbl = uitable(g, 'Data', cell(0, numel(hdrNames)), 'ColumnName', hdrNames, ...
-        'ColumnWidth', {40, 150, 60, 80, 130, 190, 60, 340, 340, 70, 70, 440, 70}, 'RowName', [], ...
-        'FontSize', 11, 'FontName', c.font, 'RowStriping', 'off', 'BackgroundColor', c.termBg, 'ForegroundColor', c.txt);
+        'ColumnWidth', {32, 125, 52, 52, 70, 140, 44, 266, 266, 74, 74, 380, 66}, 'RowName', [], ...
+        'FontSize', 10, 'FontName', c.font, 'RowStriping', 'off', 'BackgroundColor', c.termBg, 'ForegroundColor', c.txt);
     histTbl.Layout.Row = 1;
     histTbl.UserData = struct('rows', {cell(0, numel(hdrNames))}, 'h', 0);
     histTbl.Tooltip = {'One row per finished run: what attacked, what was detected, what each', ...
@@ -788,7 +804,7 @@ function fitHistCols(tbl, avail)
     try
         w = tbl.ColumnWidth; k = numel(w) - 1;
         rest = sum(cell2mat(w([1:k-1, k+1:end])));
-        w{k} = max(440, floor(avail) - rest - 24);
+        w{k} = max(330, floor(avail) - rest - 24);
         tbl.ColumnWidth = w;
     catch
     end
@@ -824,13 +840,14 @@ function styleAx(ax, c)
     ax.Color = c.axBg; ax.XColor = c.mut; ax.YColor = c.mut;
     ax.GridColor = [0.55 0.60 0.70]; ax.GridAlpha = 0.25;
     ax.FontName = c.font; ax.FontSize = 10; ax.Box = 'off';
+    try, ax.TickLabelInterpreter = 'none'; catch, end %#ok<CTCH>
     try, ax.BackgroundColor = c.panelBg; catch, end %#ok<CTCH>
     try, ax.Toolbar.Visible = 'off'; catch, end %#ok<CTCH>
     try, disableDefaultInteractivity(ax); catch, end %#ok<CTCH>
 end
 
 function setTitle(ax, ttl, c)
-    title(ax, ttl, 'Color', c.txt, 'FontSize', 11, 'FontWeight', 'bold', 'FontName', c.font);
+    title(ax, ttl, 'Color', c.txt, 'FontSize', 11, 'FontWeight', 'bold', 'FontName', c.font, 'Interpreter', 'none');
 end
 
 function s = mergeStructs(a, b)
@@ -978,7 +995,7 @@ end
 function s = kText(p)
     % Rician K-factor of the link as init_params.m sets it.
     if isfield(p, 'k_random') && p.k_random && isfield(p, 'k_range_db')
-        s = sprintf('Rician K %g..%g dB per flight', p.k_range_db);
+        s = sprintf('Rician K %g to %g dB', p.k_range_db);
     else
         s = sprintf('Rician K = %g dB', p.rician_k);
     end
@@ -1085,6 +1102,7 @@ function exportHistory(btn, ~)
     save([baseName '.mat'], 'history');
     appLog(fig, sprintf('Exported %d runs to %s (.csv / .mat). The event log is saved per sequence in GUI_Results/demo_session_*.log', ...
         numel(H), baseName));
+    appLog(fig, deployedLine(fig.UserData.env));
 end
 
 %% =====================================================================
@@ -1126,6 +1144,7 @@ function runSequence(btn, ~)
     setappdata(fig, 'logFid', fopen(sprintf('GUI_Results/demo_session_%s.log', stamp), 'w'));
 
     appLog(fig, '--- NEW SEQUENCE ---');
+    appLog(fig, deployedLine(env));
     appLog(fig, sprintf('%d run(s) queued | speed %.1f km/h | severity: %s', nRuns, ui.speedSpin.Value, sevName));
     setProgress(fig, 0); ui.progLbl.Text = sprintf('PROGRESS  0 / %d', nRuns);
 
@@ -1281,12 +1300,15 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
     dep = env.dep; kindD = console_policy('kind', dep, dep.esc);     % the deployed policy, as train_dqn.m chose it
     PPd = console_policy('settings', dep, PPr, true);                % a rule fallback: its own monitor, the slider's threshold
     cfgD = env.na; cfgR = env.na; memD = []; memR = []; dqn_ms = NaN;
-    cfgC = env.na; memC = []; coreOpt = console_core('policy_opt');
+    cfgC = env.na; memC = [];
+    optD = console_policy('opt', dep, env.adopt, 'deployed', struct());   % adopted settings; struct() when off
+    optR = console_policy('opt', dep, env.adopt, 'rule', struct());
+    coreOpt = console_policy('opt', dep, env.adopt, 'core', console_core('policy_opt'));
     for i = 1:size(leadF, 1)                                    % clean lead-in: reference only
         obs = struct('probs', probsL(:, i)', 'unknown', mahaL(i) < PPr.maha_thr, 'maha', mahaL(i), 'feat', leadF(i, :), ...
             'ber', leadB(i), 'gant', leadG(i, :), 'idle', leadI(i, :), 'bch', leadC(i, :), 'mmse_pred', leadM(i));
-        [cfgD, memD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent);
-        [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
+        [cfgD, memD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent, optD);
+        [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, [], optR);
         [cfgC, memC] = policy_decide('rule_esc', obs, cfgC, memC, PPr, [], coreOpt);
     end
     if cfgD ~= env.na
@@ -1302,9 +1324,9 @@ function runOneRun(fig, threat, ebno, sevLevel, tSeq)
             'ber', ber_f(vf(i)), 'gant', F.gain_ant(:, vf(i))', 'idle', F.idle(:, vf(i))', 'bch', F.bch(:, vf(i))', ...
             'mmse_pred', F.mmse_pred(vf(i)));
         t2 = tic;
-        [cfgD, memD, dD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent);
+        [cfgD, memD, dD] = policy_decide(kindD, obs, cfgD, memD, PPd, env.dqn_agent, optD);
         dqn_ms = toc(t2) * 1000;
-        [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, []);
+        [cfgR, memR] = policy_decide('rule_esc', obs, cfgR, memR, PPr, [], optR);
         [cfgC, memC] = policy_decide('rule_esc', obs, cfgC, memC, PPr, [], coreOpt);
     end
     st3 = [];                                                 % the window's frames of the three-state CNN
@@ -1542,6 +1564,26 @@ function s = deployedText(dep)
     end
 end
 
+function s = deployedLine(env)
+    % The deployed policy and, when the bundle adopts settings, the adopted line, for the session log.
+    s = sprintf('deployed policy: %s', env.dep.text);
+    a = console_policy('adopt_line', env.adopt);
+    if ~isempty(a), s = [s ' | ' a]; end
+end
+
+function dc = dropConfirmOf(env)
+    % The drop alarm's own confirmation [k n] of the deployed policy (policy_monitor.m); [] when none.
+    dc = [];
+    if isfield(env.PPdep, 'confirm_drop') && ~isempty(env.PPdep.confirm_drop), dc = env.PPdep.confirm_drop; end
+end
+
+function s = confirmText(env)
+    % The monitor's two confirmations of the deployed policy, named: the class alarm and, when set, the drop alarm's own.
+    s = sprintf('class alarm confirmation %d-of-%d', confirmOf(env));
+    dc = dropConfirmOf(env);
+    if ~isempty(dc), s = sprintf('%s, drop alarm confirmation %d-of-%d', s, dc(1), dc(2)); end
+end
+
 function s = polNames(env, p)
     % Display names of the console's policies ('dqn' is the deployed policy); a cell array in, a cell array out.
     if iscell(p), s = cellfun(@(q) polNames(env, q), p, 'UniformOutput', false); return; end
@@ -1740,7 +1782,7 @@ function drawQ(fig, qv, aidx, ridx)
         cla(ax); ax.XLim = [0 1]; ax.YLim = [0 1]; ax.XTick = []; ax.YTick = [];
         text(ax, 0.5, 0.5, {sprintf('The deployed policy is the %s:', data.env.dep.name), 'it has no Q-values.', ...
             ['Choice: ' actionLabel(data.env.action_names{aidx})]}, 'Color', c.txt, 'FontSize', 10, 'FontName', c.font, ...
-            'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle');
+            'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', 'Interpreter', 'none');
         setTitle(ax, 'Deployed policy: rule + escalation, no scores', c);
         ax.TitleHorizontalAlignment = 'right';
         return;
@@ -1975,7 +2017,7 @@ end
 function drawJammerIcon(ax, x, y, col, label, c)
     patch(ax, [x-0.35 x+0.35 x], [y-0.22 y-0.22 y+0.28], col, 'EdgeColor', 'w', 'LineWidth', 1);
     text(ax, x, y - 0.40, label, 'Color', col, 'FontWeight', 'bold', 'FontSize', 9, ...
-        'HorizontalAlignment', 'center', 'FontName', c.font);
+        'HorizontalAlignment', 'center', 'FontName', c.font, 'Interpreter', 'none');
 end
 
 function drawWaves(ax, x, y, col)
@@ -2023,10 +2065,10 @@ function drawThreat(ax, scen, xm, ym, xg, yg, xu, yu, c)
             text(ax, xm, ym - 0.5, 'RANGE / ATTENUATION', 'Color', c.amber, 'FontSize', 9, ...
                 'HorizontalAlignment', 'center', 'FontName', c.font);
         case 'antenna_fault'
-            text(ax, xu - 2.1, yu + 0.85, 'ANTENNA FAULT', 'Color', c.amber, 'FontWeight', 'bold', ...
+            text(ax, xu - 2.1, yu + 0.65, 'ANTENNA FAULT', 'Color', c.amber, 'FontWeight', 'bold', ...
                 'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
         case 'airframe_shadowing'
-            text(ax, xu - 2.1, yu + 0.85, 'BANKING TURN: ONE ANTENNA SHADOWED', 'Color', c.amber, 'FontWeight', 'bold', ...
+            text(ax, xu - 2.1, yu + 0.65, 'BANKING TURN: ONE ANTENNA SHADOWED', 'Color', c.amber, 'FontWeight', 'bold', ...
                 'FontSize', 9, 'HorizontalAlignment', 'center', 'FontName', c.font);
         case 'benign_interference'
             patch(ax, [xm-0.3 xm+0.3 xm+0.3 xm-0.3], [jy-0.2 jy-0.2 jy+0.2 jy+0.2], c.accent, ...
@@ -2197,6 +2239,11 @@ function runEpisode(btn, ~)
     [p, sevTxt] = scenarioParams(env, threat, sevLevel, v_kmh);
     escTxt = ternaryStr(esc, 'on', 'off');
     if esc ~= env.dep.esc, escTxt = sprintf('%s (not the deployed setting: the deployed policy runs with it %s)', escTxt, ternaryStr(env.dep.esc, 'on', 'off')); end
+    escNote = '';
+    if env.adopt.on && esc ~= env.dep.esc
+        escNote = 'the adopted settings are applied to this escalation variant; it was not evaluated separately';
+        appLog(fig, ['EPISODE NOTE: ' escNote]);
+    end
     appLog(fig, sprintf('EPISODE: %s @ %g dB | %s | %.1f km/h | %s | escalation %s | seed %d', ...
         threatLabel(threat), ebno, sevTxt, v_kmh, strjoin(polNames(env, policies), ' + '), escTxt, seed));
 
@@ -2208,6 +2255,7 @@ function runEpisode(btn, ~)
         else, appLog(fig, ['EPISODE ERROR: ' ME.message]); end
         return;
     end
+    epSay(fig, sprintf('Running: %d cycles (%d clean, %d under attack)', N_PRE + N_POST, N_PRE, N_POST));
     na = find(strcmp(env.action_names, 'no_action'), 1);
     nA = numel(env.action_names);
     ev = Pt{na}.ev;                                            % a rolling-in flight: the frame its event starts
@@ -2238,6 +2286,9 @@ function runEpisode(btn, ~)
         ctx{i}.core_rule = strcmp(policies{i}, 'core');
         if strcmp(policies{i}, 'dqn')                          % the deployed policy: the DQN, or the rule fallback on its own monitor
             ctx{i} = console_policy('ctx', env.dep, esc, ctx{i});
+        end
+        if ismember(policies{i}, {'dqn', 'rule', 'core'})      % the adopted settings of the bundle, none when off
+            ctx{i} = console_policy('adopt_ctx', env.dep, env.adopt, policies{i}, ctx{i});
         end
     end
     rsE = RandStream('mt19937ar', 'Seed', seed);               % same sub-run and frame positions for every policy
@@ -2299,8 +2350,8 @@ function runEpisode(btn, ~)
 
     %% ---- summary ----
     lines = {sprintf('%s @ %g dB, %s, %.1f km/h | seed %d | %d/%d cycles (%.1f s)', threatLabel(threat), ebno, ...
-        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | alarm confirmation %d-of-%d, rule dwell %d / hold %d, escalation %s', ...
-        bc, confirmOf(env), env.DC.dwell, env.DC.hold, ternaryStr(esc, 'on', 'off'))};
+        sevTxt, v_kmh, seed, kDone, N, toc(tLoop)), sprintf('clean BER %.2e | %s, rule dwell %d / hold %d, escalation %s', ...
+        bc, confirmText(env), env.DC.dwell, env.DC.hold, ternaryStr(esc, 'on', 'off'))};
     rows = {};
     truthName = [repmat({'none'}, 1, N_PRE), repmat({threat}, 1, N_POST)];
     for i = 1:nP
@@ -2313,10 +2364,10 @@ function runEpisode(btn, ~)
         if ~isempty(env.core) && kDone > 0
             r = T.st(i, 1:kDone) == stTruth(1:kDone);
             if tk > 0 && kDone > N_PRE
-                lines{end+1} = sprintf('   three-state CNN read the true state in %.0f%% of the clean and %.0f%% of the attacked cycles', ...
+                lines{end+1} = sprintf('   three-state CNN: state read equals the true state in %.0f%% of the clean and %.0f%% of the attacked cycles (a clean read on a mitigated link counts as not equal)', ...
                     100 * mean(r(1:min(N_PRE, kDone))), 100 * mean(r(N_PRE + 1:kDone))); %#ok<AGROW>
             else
-                lines{end+1} = sprintf('   three-state CNN read clean in %.0f%% of the clean cycles (the threat is none of its three states)', ...
+                lines{end+1} = sprintf('   three-state CNN: state read equals clean in %.0f%% of the clean cycles (the threat is none of its three states)', ...
                     100 * mean(r(1:min(N_PRE, kDone)))); %#ok<AGROW>
             end
         end
@@ -2330,6 +2381,7 @@ function runEpisode(btn, ~)
         end
     end
     lines{end+1} = 'T_* in cycles after onset; recovered = 5-cycle BER mean <= 2x clean for 10 cycles.';
+    if ~isempty(escNote), lines{end+1} = ['Note: ' escNote '.']; end
     epSay(fig, lines);
 
     if ~isempty(rows)
@@ -2495,9 +2547,10 @@ function H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies, stTruth)
     xline(ax, N_PRE + 0.5, '-', 'threat onset', 'Color', c.amber, 'LineWidth', 1.5, 'LabelVerticalAlignment', 'bottom', ...
         'FontSize', 9, 'HandleVisibility', 'off');
     H.ber = gobjects(1, nP); H.ma = gobjects(1, nP); H.swB = gobjects(1, nP);
+    lw = [4.6 2.8 1.4];                                      % the first policy is the thickest, so a line under another stays visible
     for i = 1:nP
         H.ber(i) = plot(ax, 1:N, nanN, '-', 'Color', 0.45*pc{i} + 0.55*c.axBg, 'LineWidth', 0.8, 'HandleVisibility', 'off');
-        H.ma(i)  = plot(ax, 1:N, nanN, '-', 'Color', pc{i}, 'LineWidth', 2.2);
+        H.ma(i)  = plot(ax, 1:N, nanN, '-', 'Color', pc{i}, 'LineWidth', lw(i));
         H.swB(i) = plot(ax, 1:N, nanN, 'v', 'MarkerSize', 9, 'MarkerFaceColor', pc{i}, 'MarkerEdgeColor', 'w', ...
             'HandleVisibility', 'off');
         hh(end+1) = H.ma(i); nm{end+1} = [polNames(env, policies{i}) ' (5-cycle mean; v = switch)']; %#ok<AGROW>
@@ -2529,21 +2582,24 @@ function H = epInitPlots(fig, N_PRE, N_POST, bc, compIdx, policies, stTruth)
 
     ax = ui.epStateAx; clearAx(ax); hold(ax, 'on');
     H.hasState = ~isempty(env.core); H.stTruth = stTruth;
-    H.stOk = gobjects(1, nP); H.stBad = gobjects(1, nP); H.stNa = gobjects(1, nP);
+    H.stOk = gobjects(1, nP); H.stBad = gobjects(1, nP); H.stNa = gobjects(1, nP); H.stMit = gobjects(1, nP);
+    H.nPre = N_PRE; H.iClean = [];
     if H.hasState
         ns = numel(env.core.names);
+        H.iClean = find(strcmpi(env.core.names, 'clean'), 1);
         stairs(ax, (1:N+1) - 0.5, [stTruth stTruth(end)], '-', 'Color', c.mut, 'LineWidth', 3);
         for i = 1:nP
             H.stOk(i)  = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 4, 'MarkerFaceColor', c.green, 'MarkerEdgeColor', pc{i});
             H.stBad(i) = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 5, 'MarkerFaceColor', c.red, 'MarkerEdgeColor', pc{i});
             H.stNa(i)  = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 4, 'MarkerFaceColor', c.mut, 'MarkerEdgeColor', pc{i});
+            H.stMit(i) = plot(ax, 1:N, nanN, mk{i}, 'MarkerSize', 4, 'MarkerFaceColor', c.amber, 'MarkerEdgeColor', pc{i});
         end
         xline(ax, N_PRE + 0.5, '-', 'Color', c.amber, 'LineWidth', 1.5);
         ax.YDir = 'reverse'; ax.YTick = 1:ns; ax.YTickLabel = env.core.names; ax.TickLabelInterpreter = 'none';
-        ax.YLim = [0.4 ns + 0.6]; setTitle(ax, 'Link state per cycle, three-state CNN  (grey = true state, green = right, red = wrong)', c);
+        ax.YLim = [0.4 ns + 0.6]; setTitle(ax, 'Link state per cycle, three-state CNN  (grey = true state, green = right, amber = clean on the mitigated link, red = wrong)', c);
     else
         text(ax, 0.5, 0.5, 'three-state CNN not in this bundle (data/core_cnn_model.mat)', 'Units', 'normalized', ...
-            'HorizontalAlignment', 'center', 'Color', c.mut, 'FontSize', 10);
+            'HorizontalAlignment', 'center', 'Color', c.mut, 'FontSize', 10, 'Interpreter', 'none');
         ax.YTick = [];
     end
     hold(ax, 'off');
@@ -2590,7 +2646,8 @@ function epUpdatePlots(H, T, k, fl, actions)
         else, setY(H.detBad(i), k, y); end
         if H.hasState && isfinite(T.st(i, k))
             tr = H.stTruth(k); h = H.stBad(i);
-            if isnan(tr), h = H.stNa(i); elseif T.st(i, k) == tr, h = H.stOk(i); end
+            if isnan(tr), h = H.stNa(i); elseif T.st(i, k) == tr, h = H.stOk(i);
+            elseif k > H.nPre && T.st(i, k) == H.iClean && T.cfg(i, k) ~= H.na, h = H.stMit(i); end   % clean read on the mitigated link
             setY(h, k, T.st(i, k) + H.off(i));
         end
     end
@@ -2698,14 +2755,22 @@ function loadKpiTab(fig)
             max(pv), P.KP.speed_bins(1), P.KP.speed_bins(end)), col);
     end
     if ~isempty(Lt)
-        setCard(ui, 3, sprintf('%.1f ms', Lt.total_dqn_median_ms), sprintf('median per cycle | p95 %.1f ms | %s', ...
-            Lt.total_dqn_p95_ms, Lt.device), c.accent);
+        H = console_policy('lat_head', Lt);
+        setCard(ui, 3, sprintf('%.2f ms', H.med), sprintf('median per cycle, %s | p95 %.2f ms | %s', ...
+            H.chain, H.p95, Lt.device), c.accent);
     end
     if ~isempty(Kp)
         appLog(fig, sprintf('KPI summary: %s', strjoin(arrayfun(@(q) sprintf('%d %s', q.id, q.status), Kp, ...
             'UniformOutput', false), ' | ')));
         % KPI 4 and 5 as measured by measure_all_kpis.m (recovered episodes, per threat)
-        k4 = Kp([Kp.id] == 4); k5 = Kp([Kp.id] == 5);
+        k1 = Kp([Kp.id] == 1); k4 = Kp([Kp.id] == 4); k5 = Kp([Kp.id] == 5);
+        t1 = []; if ~isempty(k1), t1 = console_policy('kpi1_head', k1.value); end
+        if ~isempty(t1)                                  % KPI 1's headline: macro-F1 above the threshold chosen on validation
+            col = c.green; if ~strcmp(k1.status, 'MET'), col = c.amber; end
+            sub = sprintf('macro-F1 from %s | lowest class %s%% | target >= 90%%', t1{3}, t1{2});
+            if ~isempty(metrics), sub = sprintf('%s | all frames: accuracy %.1f%%', sub, metrics.overall_accuracy_pct); end
+            setCard(ui, 1, sprintf('%s%%', t1{1}), sub, col);
+        end
         t4 = regexp(k4.value, 'lowest threat (\S+) ([\d.]+)%, (\d+) of (\d+) threats', 'tokens', 'once');
         if ~isempty(t4)
             col = c.green; if ~strcmp(k4.status, 'MET'), col = c.amber; end
@@ -2805,8 +2870,8 @@ function ok = plotRecSnr(ax, P, c)
     h = plot(ax, P.KP.ebno, P.KP.per_ebno, '-o', 'LineWidth', 1.5, 'MarkerSize', 4);
     hold(ax, 'off'); ax.XTick = P.KP.ebno; ax.YLim = [0 105]; grid(ax, 'on');
     xlabel(ax, 'Eb/N0 (dB)', 'Color', c.mut); ylabel(ax, 'restored cycles after onset (%)', 'Color', c.mut);
-    legend(ax, h, P.KP.show_lbl, 'Location', 'southeast', 'TextColor', c.txt, 'Color', c.panelBg, ...
-        'EdgeColor', c.mut, 'FontSize', 7);
+    legend(ax, h, P.KP.show_lbl, 'Location', 'eastoutside', 'TextColor', c.txt, 'Color', c.panelBg, ...
+        'EdgeColor', c.mut, 'FontSize', 7, 'Interpreter', 'none');
     setTitle(ax, 'Restoration vs Eb/N0 (single threats, test pools)', c);
 end
 
@@ -2816,8 +2881,8 @@ function ok = plotLatency(ax, Lt, c)
     ax.XTick = 1:numel(Lt.names); ax.XTickLabel = Lt.names; ax.XTickLabelRotation = 30;
     ax.FontSize = 8; grid(ax, 'on'); ylabel(ax, 'ms', 'Color', c.mut);
     legend(ax, {'median', 'p95'}, 'TextColor', c.txt, 'Color', c.panelBg, 'EdgeColor', c.mut, 'FontSize', 8);
-    setTitle(ax, sprintf('Latency per cycle: %.2f ms median, %.2f ms p95', Lt.total_dqn_median_ms, ...
-        Lt.total_dqn_p95_ms), c);
+    H = console_policy('lat_head', Lt);
+    setTitle(ax, sprintf('Latency per cycle, %s: %.2f ms median, %.2f ms p95', H.chain, H.med, H.p95), c);
 end
 
 function ok = plotActions(ax, P, c)

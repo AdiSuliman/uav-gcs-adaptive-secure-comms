@@ -827,6 +827,7 @@ cl = onCleanup(@() fixture_off(d, {'ternary', 'policy_names_block'})); %#ok<NASG
 write_text(fullfile(d, 'ternary.m'), sprintf('function out = ternary(c, a, b)\nif c, out = a; else, out = b; end\nend\n'));
 write_text(fullfile(d, 'policy_names_block.m'), strrep(src(i0:i1 - 1), sprintf('\r'), ''));
 addpath(d);
+ADP = adopt_options([]); %#ok<NASGU>                           % the script sets it before the block: off
 run(fullfile(d, 'policy_names_block.m'));
 end
 
