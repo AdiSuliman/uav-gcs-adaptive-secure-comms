@@ -777,9 +777,11 @@ for k = 1:size(pl, 1)
     src = fullfile(tc.TestData.root, pl{k, 1});
     if strcmp(pl{k, 1}, km), src = fullfile(d7{2}, 'measure_all_kpis.m'); end
     c = undo_small(strrep(fileread(src), char(13), ''), pl{k, 1});
-    if endsWith(pl{k, 1}, 'evaluate_policies.m')     % the adoption hook lines (off by default; test_adopt holds them)
-        verifyNumElements(tc, regexp(c, '[^\n]*ADP[^\n]*\n'), 8, 'adoption hook lines');
-        c = regexprep(c, '[^\n]*ADP[^\n]*\n', '');
+    na = struct('evaluate_policies', 8, 'experiment_combo_generalization', 5, 'experiment_unknown_threat', 5);   % the adoption hooks, off by default
+    [~, nm] = fileparts(pl{k, 1});
+    if isfield(na, nm)                                % test_adopt and test_adopt_hop hold them
+        verifyNumElements(tc, regexp(c, '[^\n]*(ADP|adopt_options|Q\.adopt)[^\n]*\n'), na.(nm), [nm ': adoption hook lines']);
+        c = regexprep(c, '[^\n]*(ADP|adopt_options|Q\.adopt)[^\n]*\n', '');
     end
     c = cut_line(tc, c, pl{k, 2}, pl{k, 1});
     if endsWith(pl{k, 1}, ex{2}), c = cut_line(tc, c, ex{1}, pl{k, 1}); c = clean_ref_cut(tc, c, 'evaluate_policies'); end

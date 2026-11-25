@@ -815,7 +815,7 @@ else
     dc = parent_copy(tc, rel, cur); cc = onCleanup(@() rmdir(dc, 's')); %#ok<NASGU>
     new = code_lines(fileread(fullfile(dc, [nm ext])));
 end
-if strcmp([nm ext], 'evaluate_policies.m'), new = new(~contains(new, 'ADP')); end   % adopt-p3's hook lines (off by default), held by test_adopt
+if strcmp([nm ext], 'evaluate_policies.m'), new = new(~contains(new, 'ADP')); end   % the adoption hooks (off by default), held by test_adopt
 for i = 1:size(blk, 1)
     pre = blk{i, 1}; add = blk{i, 2}; post = blk{i, 3};
     where = sprintf('%s after "%s"', rel, pre{end});

@@ -1928,7 +1928,7 @@ q = cellfun(@(x) str2double(x{1}), regexp(src, 'RandStream\(''mt19937ar'', ''See
 verifyEqual(tc, numel(unique(q)), numel(q));
 verifyEqual(tc, sum(q == 2075), 1);
 f = dir(fullfile(tc.TestData.root, 'code', '**', '*.m'));
-f = f(~contains({f.folder}, [filesep 'tests']) & ~strcmp({f.name}, 'evaluate_policies.m'));
+f = f(~contains({f.folder}, [filesep 'tests']) & ~ismember({f.name}, {'evaluate_policies.m', 'adopt_reading.m'}));   % adopt_reading.m replays single2's draws (hop_off)
 verifyEmpty(tc, f(cellfun(@(n, d) ~isempty(regexp(fileread(fullfile(d, n)), '(Seed''|rng\()\s*,?\s*2075\>', 'once')), ...
     {f.name}, {f.folder})), 'Seed 2075');
 b = cellfun(@(x) str2double(x{1}), regexp(src, 'policy_run_set\([^\n]*opt, (\d{5})', 'tokens'));

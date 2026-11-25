@@ -16,7 +16,8 @@ setup_paths;
 tc.TestData.cwd = pwd;
 tc.TestData.tmp = tempname; mkdir(tc.TestData.tmp); cd(tc.TestData.tmp);
 tc.TestData.base = 'cc2d4f1';                                    % the commit this branch starts from
-tc.TestData.tree_rev = '81ecc06';                                % profile 3's HEAD, the tree's code
+tc.TestData.tree_rev = '978ee31';                                % profile 3's HEAD, the tree's code
+tc.TestData.hop_rev = 'f1a9c1c';                                 % the hop reading's test read: the decision layer it ran
 end
 
 function teardownOnce(tc)
@@ -119,6 +120,13 @@ for f = {'decision/policy_decide.m', 'decision/rule_based_policy.m', 'decision/d
         'decision/policy_stamp.m', 'decision/policy_setup.m', 'decision/policy_run_set.m', 'decision/rollout_policy.m', ...
         'decision/policy_monitor.m', 'evaluation/lect_kpis.m'}
     moved = moved || ~same_as_rev(tc, tc.TestData.base, ['code/' f{1}]);
+end
+for f = {'decision/dqn_fix.m', 'decision/lb_complete.m'}                     % the hop reading's DQN layers
+    moved = moved || ~same_as_rev(tc, tc.TestData.hop_rev, ['code/' f{1}]);
+end
+for f = {'decision/rule_based_policy.m', 'decision/rule_fix.m', 'decision/policy_setup.m', 'decision/policy_run_set.m', ...
+        'decision/rollout_policy.m'}
+    verifyTrue(tc, same_rev(tc, tc.TestData.base, tc.TestData.hop_rev, ['code/' f{1}]), f{1});   % the hop reading's test read holds the rule fix's layer
 end
 for f = {'evaluation/measure_all_kpis.m', 'evaluation/build_kpi_dashboard.m', 'evaluation/export_report_numbers.m', ...
         'evaluation/lect_kpi_table.m', 'evaluation/result_status.m', 'evaluation/lect_kpis.m'}
@@ -452,6 +460,11 @@ KPI = struct('id', {1, 2}, 'detail', {{'a'}, {'b'}}); LECT = struct('x', 1); %#o
 save(f('a.mat'), 'KPI', 'LECT'); save(f('b.mat'), 'KPI', 'LECT');
 KPI(2).detail = {'c'}; save(f('c.mat'), 'KPI', 'LECT');
 verifyTrue(tc, adopt_reading('compare', f('a.mat'), f('b.mat')).ok);
+LB = struct('v', 1, 'created', '24-Nov-2026 06:59:00'); save(f('l1.mat'), 'LB');
+LB.created = '23-Nov-2026 10:00:00'; save(f('l2.mat'), 'LB');
+LB.v = 2; save(f('l3.mat'), 'LB');
+verifyTrue(tc, adopt_reading('compare', f('l1.mat'), f('l2.mat')).ok);
+C = adopt_reading('compare', f('l1.mat'), f('l3.mat')); verifyFalse(tc, C.ok); verifyTrue(tc, contains(C.why, 'LB.v'));
 C = adopt_reading('compare', f('a.mat'), f('c.mat')); verifyFalse(tc, C.ok); verifyTrue(tc, contains(C.why, 'KPI(2).detail'));
 im = uint8(mod(magic(100), 256)); imwrite(im, f('a.png')); imwrite(im, f('b.png'));
 im1 = im; im1(3, 3) = 255 - im1(3, 3); imwrite(im1, f('c.png'));

@@ -58,9 +58,12 @@ SPL = TEST; if numel(PP.runs) >= TEST2, SPL = [TEST TEST2]; end
 c1 = find(strcmp(PP.scen, threats{1}), 1);
 nfl = sum(arrayfun(@(sp) numel(PP.cell_geo{c1}{sp}), SPL));       % flights per (cell, Eb/N0)
 cfgc = []; if exist('CFG', 'var'), cfgc = CFG; end
+ADP = adopt_options(cfgc);                           % adopted settings (CFG.adopt, adopt_options.m), off by default
+if ADP.on, Q.adopt = ADP; end                        % the entities read the adoption through Q
 CDIR = run_cache('dir', run_cache('on', cfgc), 'C2u'); CID = '';     % every threat kept as it finishes (run_cache.m)
 if ~isempty(CDIR), CID = run_cache('inputs', {'data/policy_pools.mat', 'data/trained_dqn.mat'}); end
 lbkey = {}; if LBC, lbkey = {'lb_columns'}; end          % the entities' results hold the completion's columns
+lbkey = [lbkey, adopt_options('key', ADP)];          % the DQN layers adopted, when any
 keys = cellfun(@(th) run_cache('key', [{CID, 'C2u', th, H, seed, REPS, NE, SPL, DK}, lbkey]), threats, 'UniformOutput', false);
 t0 = tic;
 out = run_cache('each', CDIR, keys, @(ti) one_threat(ti, threats, PP, K, Q, H, seed, nS, SPL, REPS, NE, DK, t0, LBC), threats);
@@ -75,6 +78,7 @@ rep{end+1} = sprintf(['Generated: %s | DQN retrained without the threat (its sin
     PP.alarm_mode, PP.confirm, Q.seed_summary.selected_fa_pen, H.gamma, seed, nfl);
 for ft = penalty_form_line(Q), rep{end+1} = ft{1}; end    % the penalty's form, when C2 trained the no-threat form
 rep{end+1} = 'Recovered = BER and packet loss <= 2x clean for 5 consecutive cycles, among recoverable episodes; [95% bootstrap over flights].';
+if ~isempty(adopt_options('key', ADP)), rep{end+1} = adopt_options('note', ADP, 'dqn'); end
 rep{end+1} = 'Evidence only: no rate is committed for an emitter outside the modelled classes.';
 rep{end+1} = '';
 rep{end+1} = sprintf('%-22s %6s %24s %24s %10s', 'threat', 'n', 'DQN, never trained', 'DQN, trained', 'rule+esc');
@@ -129,6 +133,7 @@ Kt = fa_form_train(Kt, Kx, Q.seed_summary);                % the selected run's 
 ag = dqn_train_run(H, PPx, Kt, Kx, Q.norm_in, seed, nS, 1, 2);
 [Ro, Ri, Rr, Ro1, Ri1] = deal([]);
 opt0 = struct(); opt1 = struct('monitor', struct('lb_complete', true));
+if isfield(Q, 'adopt'), opt1 = adopt_options('dqn', Q.adopt, opt1); end   % the deployed DQN's adopted layers
 if LBC, opt0 = struct('monitor', struct('lb_complete', false)); end
 for sp = SPL
     specs = test_episodes(c, numel(PP.ebno), K.geo(c, sp), REPS, NE, H.T, ...

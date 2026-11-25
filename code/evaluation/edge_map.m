@@ -177,6 +177,8 @@ dep = Q.deployed;                                     % deployed policy (train_d
 FAV = double(Q.fa_bound_met);                         % false-alarm bound met on validation: else no point commits
 fixed_mmse = find(strcmp(PP.actions, 'spatial_diversity'), 1);
 POL = unique({dep, 'none', 'rule_esc', 'oracle', 'random', 'fixed_mmse'}, 'stable'); nP = numel(POL);
+cfge = []; if exist('CFG', 'var'), cfge = CFG; end
+ADP = adopt_options(cfge);                            % adopted settings (CFG.adopt): the deployed DQN's layers only
 NAMES = struct('dqn_esc', 'DQN + escalation', 'dqn', 'DQN', 'rule_sel', 'rule + escalation, own monitor', 'none', 'no response', ...
     'rule_esc', 'rule + escalation', 'oracle', 'oracle (one-step)', 'random', 'random', ...
     'fixed_mmse', 'receiver only (always-on MMSE)');
@@ -275,6 +277,7 @@ for ri = 1:numel(RUN)
     spec = bs.spec; for k = 1:numel(spec), spec{k}.delay = RUN(ri).D; end
     for pk = RUN(ri).pols
         [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, [], fixed_mmse, [], K.na);
+        if strcmp(POL{pk}, dep), opt = adopt_options('dqn', ADP, opt); end
         if bs.ag > 0, ag = U.agents_loo{bs.ag}; end
         RES{ri, pk} = policy_run_set(kind, PP, K, spec, bs.split, ag, opt, 200000 + 1000 * RUN(ri).b);
         [VAR, RV(ri, pk)] = var_add(VAR, bs.kind, bs.fd, RUN(ri).D, pk);
@@ -297,6 +300,7 @@ if isfile('data/clean_test_pools.mat')
         pks = 1:nP; if d > 1, pks = 1; end
         for pk = pks
             [kind, ag, opt] = policy_setup(POL{pk}, Q, sel, [], fixed_mmse, [], K.na);
+            if strcmp(POL{pk}, dep), opt = adopt_options('dqn', ADP, opt); end
             RW{d, pk} = policy_run_set(kind, PPw, Kw, spec, TEST, ag, opt, 40000);
             VAR = var_add(VAR, 'clean', NaN, DLY(d), pk);
         end
@@ -634,6 +638,7 @@ if isfile('data/check_pools.mat')
     Kc = link_env('tables', CK, 'flight');
     ck = find(~strcmp(CK.scen, 'none')); k0 = find(strcmp(CK.scen, 'none'), 1); nK = numel(CK.ebno);
     [kind, ag, opt] = policy_setup(dep, Q, sel, [], fixed_mmse, [], Kc.na);
+    opt = adopt_options('dqn', ADP, opt);
     specs = {};
     [u, ~, j] = unique(cellfun(@(e, g) [mat2str(e) '|' mat2str(g{1})], CK.cell_ebs(ck), CK.cell_geo(ck), ...
         'UniformOutput', false), 'stable');               % the cells at the same Eb/N0 on the same flights
@@ -1214,6 +1219,7 @@ for f = {'fa', 'link', 'link_pre'}
     rep{end+1} = sprintf('clean link %s: %s', upper(f{1}), strjoin(arrayfun(@(b) sprintf('%s %s', BD(b).name, ...
         band_txt(CB.(f{1})(b))), 1:nB, 'UniformOutput', false), ' | ')); %#ok<SAGROW>
 end
+if ~isempty(adopt_options('key', ADP)), rep{end+1} = adopt_options('note', ADP, 'dqn'); end
 fid = fopen('results/edge_map.txt', 'w'); fprintf(fid, '%s\n', rep{:}); fclose(fid);
 
 % Summary
