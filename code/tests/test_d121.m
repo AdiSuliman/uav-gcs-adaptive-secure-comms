@@ -14,6 +14,7 @@ function setupOnce(tc)
 tc.TestData.root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
 addpath(fullfile(tc.TestData.root, 'code'));
 setup_paths;
+addpath(fullfile(tc.TestData.root, 'code', 'tests', 'helpers'));
 end
 
 %% ---------- fixtures ----------
@@ -159,11 +160,9 @@ end
 
 function test_rule_core_policy_byte_identical(tc)
 base = '7bc9bfa';      % core-bw-rule-fix's tip: f6f6e03's file plus PP.core_blind's argument
-repo = tc.TestData.root;
-[sg, ~] = system(sprintf('git --no-optional-locks -C "%s" rev-parse --git-dir', repo));
-if sg ~= 0 && ~isempty(getenv('V7_GIT_REPO')), repo = getenv('V7_GIT_REPO'); end
-[st, oldtxt] = system(sprintf('git --no-optional-locks -C "%s" show %s:code/decision/rule_core_policy.m', repo, base));
-assertEqual(tc, st, 0, sprintf('git show %s failed: %s', base, oldtxt));
+d = pb_parent_dir(tc, base, {'code/decision/rule_core_policy.m'});   % git -C with the V7_GIT_REPO fallback, status 0 asserted
+cl = onCleanup(@() rmdir(d, 's'));
+oldtxt = fileread(fullfile(d, 'rule_core_policy.m'));
 newtxt = fileread(which('rule_core_policy'));
 verifyEqual(tc, strrep(newtxt, char(13), ''), strrep(oldtxt, char(13), ''));
 end
@@ -644,7 +643,7 @@ end
 ev = fileread(which('evaluate_policies'));
 verifyNumElements(tc, regexp(ev, 'speed_nonemitter\(', 'match'), 1);
 verifyNumElements(tc, regexp(ev, 'KP\.speed_ne\s*=', 'match'), 1);
-mk = fileread(which('measure_all_kpis'));
+mk = src_of('measure_all_kpis');
 verifyNotEmpty(tc, regexp(mk, 'speed_ne', 'once'));
 parses_ok(tc, 'speed_nonemitter'); parses_ok(tc, 'evaluate_policies'); parses_ok(tc, 'measure_all_kpis');
 end
