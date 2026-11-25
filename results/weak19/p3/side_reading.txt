@@ -1,0 +1,69 @@
+Side reading (descriptive, selects nothing; from saved outputs of the single test read)
+Sources: results/weak19/p3/test.mat (D125, dqn_hop off/on, comb set), rulerows_test.mat (D127, rule rows off and keep+st+rate on); 30 cycles per episode, 20 ms; nominal payload 50.00 kb/s.
+Intervals: 95% cluster bootstrap over flight geometries (2000 draws, seeds 2800+), difference = on minus off over the same episodes.
+
+1. D125, dqn_hop comb set (recoverable threat episodes of the fresh comb set)
+  2736 episodes, 143 clusters (flight geometries)
+  recovered, off x on (cell: episodes; delivered payload after onset [% of nominal] and packet loss after onset [%], mean off -> on within the cell):
+    off not recovered  on not recovered  n   337 (12.3%)  delivered 11.9 -> 12.4  packet loss 77.5 -> 74.2
+    off not recovered  on recovered      n   362 (13.2%)  delivered 4.0 -> 11.3  packet loss 93.5 -> 57.4
+    off recovered      on not recovered  n     7 ( 0.3%)  delivered 26.1 -> 11.6  packet loss 48.2 -> 67.7
+    off recovered      on recovered      n  2030 (74.2%)  delivered 32.6 -> 31.9  packet loss 40.6 -> 37.6
+  recovered    74.5% ->  87.4%   paired difference +12.98 [+11.38, +14.61] points
+  held         48.4% ->  63.3%   paired difference +14.91 [+13.17, +16.65] points (held off -> on: 19 lost, 427 gained)
+  packet loss after onset (per_post)  52.2% ->  44.8%   paired difference -7.36 [-8.16, -6.58] points (2736 episodes with a packet in both)
+  delivered after onset (dlv_post)    26.3% ->  26.7%   paired difference +0.45 [+0.17, +0.71] points of the nominal payload
+
+2. D127, rule rows off -> with keep+st+rate
+  Subsets as the read printed them: 32256 threat episodes (all three fresh sets pooled), 11294 recoverable jamming episodes (jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming), 8638 of them recoverable by the core action set.
+  Delivered = nominal payload x dlv_post (payload bits delivered after onset); normalized = gput_post (goodput factor of the configuration, before packet loss); difference = on minus off.
+  rule_esc (rule + escalation):
+    threat episodes                                      n 32256, 720 clusters: delivered 21.47 -> 18.65  -2.82 [-3.26, -2.40] kb/s; normalized 0.612 -> 0.532  -0.080 [-0.089, -0.071]
+    recoverable jamming episodes (36 configurations)     n 11294, 144 clusters: delivered 25.45 -> 20.11  -5.34 [-6.23, -4.51] kb/s; normalized 0.732 -> 0.584  -0.149 [-0.167, -0.130]
+  blind_esc (no detector + escalation):
+    threat episodes                                      n 32256, 720 clusters: delivered 23.78 -> 23.83  +0.05 [+0.03, +0.08] kb/s; normalized 0.691 -> 0.693  +0.002 [+0.001, +0.004]
+    recoverable jamming episodes (36 configurations)     n 11294, 144 clusters: delivered 28.98 -> 29.05  +0.07 [+0.03, +0.11] kb/s; normalized 0.850 -> 0.853  +0.003 [+0.001, +0.005]
+  rule_core (core rule + escalation):
+    threat episodes                                      n 32256, 720 clusters: delivered 11.31 -> 8.48  -2.82 [-3.22, -2.42] kb/s; normalized 0.325 -> 0.241  -0.084 [-0.093, -0.074]
+    recoverable jamming episodes (36 configurations)     n 11294, 144 clusters: delivered 11.35 -> 7.45  -3.89 [-4.53, -3.24] kb/s; normalized 0.330 -> 0.214  -0.115 [-0.130, -0.100]
+    recoverable jamming episodes (core action set)       n  8638, 144 clusters: delivered 12.38 -> 7.54  -4.84 [-5.71, -3.97] kb/s; normalized 0.371 -> 0.223  -0.149 [-0.168, -0.128]
+  blind_core (core no detector + escalation):
+    threat episodes                                      n 32256, 720 clusters: delivered 9.15 -> 9.04  -0.11 [-0.17, -0.06] kb/s; normalized 0.263 -> 0.260  -0.003 [-0.005, -0.002]
+    recoverable jamming episodes (36 configurations)     n 11294, 144 clusters: delivered 8.47 -> 8.20  -0.27 [-0.39, -0.16] kb/s; normalized 0.247 -> 0.240  -0.008 [-0.011, -0.004]
+    recoverable jamming episodes (core action set)       n  8638, 144 clusters: delivered 8.32 -> 7.95  -0.37 [-0.51, -0.23] kb/s; normalized 0.250 -> 0.239  -0.011 [-0.015, -0.006]
+
+3. D127, clean flights: false changes per hour, off -> on
+  1800 clean flights of 30 cycles; rate = changes / (flights x cycles) x 180000 cycles per hour; "bound" the one-sided 95% Garwood upper bound of that rate (Poisson count; changes cluster in flights, so the bound is optimistic).
+  rule_esc    changes 163 -> 163 (flights with a change 131 -> 131 of 1800); per hour 543.3 -> 543.3 (change +0.0); bound 618.7 -> 618.7; added on a flight 0, removed 0 (bound on the added changes per hour 10.0)
+  blind_esc   changes 133 -> 133 (flights with a change 101 -> 101 of 1800); per hour 443.3 -> 443.3 (change +0.0); bound 512.0 -> 512.0; added on a flight 0, removed 0 (bound on the added changes per hour 10.0)
+  rule_core   changes 233 -> 237 (flights with a change 132 -> 132 of 1800); per hour 776.7 -> 790.0 (change +13.3); bound 865.7 -> 879.8; added on a flight 4, removed 0 (bound on the added changes per hour 30.5)
+  blind_core  changes 202 -> 212 (flights with a change 102 -> 102 of 1800); per hour 673.3 -> 706.7 (change +33.3); bound 756.6 -> 791.9; added on a flight 13, removed 3 (bound on the added changes per hour 68.9)
+
+4. Joint Bonferroni over the four confirmatory tests
+  Joint Bonferroni over 4 tests at 0.05/4 = 0.0125: all pass (one-sided cluster-bootstrap p, 2000 draws: dqn_hop comb (D125) p < 0.0005 (no draw at or below 0); esc_recovered p < 0.0005 (no draw at or below 0); core_narrowband p < 0.0005 (no draw at or below 0); core_wideband p < 0.0005 (no draw at or below 0))
+
+Cross-checks against the numbers the read printed:
+  ok       D125 dqn_hop comb gain +12.98 points, 143 clusters (printed +12.98, 143)
+  ok       D127 esc_recovered gain +7.29 points, 720 clusters (printed +7.29, 720)
+  ok       D127 core_narrowband gain +10.71 points, 144 clusters (printed +10.71, 144)
+  ok       D127 core_wideband gain +5.78 points, 144 clusters (printed +5.78, 144)
+  ok       recomputed one-sided p equal the stored ones (0.0000, 0.0000, 0.0000, 0.0000)
+  ok       episodes threat: 32256 (printed 32256)
+  ok       episodes jam36: 11294 (printed 11294)
+  ok       episodes jamcore: 8638 (printed 8638)
+  ok       rule_esc, threat: delivered 21.47 -> 18.65 kb/s (printed 21.47 -> 18.65)
+  ok       rule_core, threat: delivered 11.31 -> 8.48 kb/s (printed 11.31 -> 8.48)
+  ok       rule_esc, jam36: delivered 25.45 -> 20.11 kb/s (printed 25.45 -> 20.11)
+  ok       blind_esc, threat: delivered 23.78 -> 23.83 kb/s (printed 23.78 -> 23.83)
+  ok       blind_esc, jam36: delivered 28.98 -> 29.05 kb/s (printed 28.98 -> 29.05)
+  ok       rule_core, jam36: delivered 11.35 -> 7.45 kb/s (printed 11.35 -> 7.45)
+  ok       rule_core, jamcore: delivered 12.38 -> 7.54 kb/s (printed 12.38 -> 7.54)
+  ok       blind_core, threat: delivered 9.15 -> 9.04 kb/s (printed 9.15 -> 9.04)
+  ok       blind_core, jam36: delivered 8.47 -> 8.20 kb/s (printed 8.47 -> 8.20)
+  ok       blind_core, jamcore: delivered 8.32 -> 7.95 kb/s (printed 8.32 -> 7.95)
+  ok       rule_esc, threat: normalized 0.612 -> 0.532 (printed 0.612 -> 0.532)
+  ok       rule_core, threat: normalized 0.325 -> 0.241 (printed 0.325 -> 0.241)
+  ok       rule_esc false changes per hour 543.3 -> 543.3 (printed 543.3 -> 543.3)
+  ok       rule_core false changes per hour 776.7 -> 790.0 (printed 776.7 -> 790.0)
+  ok       blind_esc false changes per hour 443.3 -> 443.3 (printed 443.3 -> 443.3)
+  ok       blind_core false changes per hour 673.3 -> 706.7 (printed 673.3 -> 706.7)

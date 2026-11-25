@@ -99,3 +99,54 @@ Step 3, lb_more, against dqn_hop=rule:
     (f) delivered after onset, pooled +0.01 (lb -0.00), comb set -0.00 (lb -0.00): ok
   -> off
 Validation done in 22.0 min. Selection frozen: dqn_hop=rule.
+
+=== WEAK POINTS 19: TEST (fresh set, read once) ===
+Generated: 23-Nov-2026 10:56:20 | setting dqn_hop=rule | fresh pools block 14 family 4, 24 geometries per (cell, Eb/N0) | clean flights w19, 1800 from 0.0 dB
+Off reproduces the deployed DQN's registered rows of single, follower, combined, unknown, clean, comb: exact
+Registered verdict (one primary endpoint per adopted step, Holm; guards):
+  dqn_hop   endpoint comb         n clusters 143 (bootstrap), gain +12.98 points, one-sided p 0.0000: Holm passes
+  guard pooled recovered lower bound      -0.01 against    -1.00: ok
+  guard pooled held lower bound           -0.04 against    -1.00: ok
+  guard pooled delivered lower bound      -0.02 against    -1.00: ok
+  guard KPI 6 bound                        4.48 against     5.00: ok
+  guard false changes per hour           403.33 against   470.00: ok
+  -> dqn_hop: CONFIRMED
+Descriptive: recovered among the recoverable (single + follower + combined), off -> on [95% interval of the paired difference]:
+  pooled                                   n 29018   96.2 ->  96.2  [-0.0, +0.0]
+  pooled, held                             n 29018   85.6 ->  85.6  [-0.0, +0.0]
+  pooled, delivered after onset            n 29018   47.5 ->  47.5  [-0.0, -0.0]
+  harmed lost-branch episodes              n   394   37.6 ->  37.6  [+0.0, +0.0]
+    harmed antenna_fault                   n   324   41.7 ->  41.7  [+0.0, +0.0]
+    harmed airframe_shadowing              n    70   18.6 ->  18.6  [+0.0, +0.0]
+  harmed combinations with a lost branch   n  4500   97.4 ->  97.4  [+0.0, +0.0]
+  path-loss family (trained)               n  3282   91.3 ->  91.3  [+0.0, +0.0]
+    tone_jamming+path_loss                 n   468   88.9 ->  88.9  [+0.0, +0.0]
+Per threat:
+    jamming                                n  2880   98.3 ->  98.3  [-0.1, +0.2]
+    noise_burst                            n  1214   96.4 ->  96.4  [+0.0, +0.0]
+    reactive_jamming                       n  2880   99.0 ->  99.0  [+0.0, +0.0]
+    path_loss                              n   834   88.8 ->  88.8  [+0.0, +0.0]
+    spoofing                               n  2880   98.4 ->  98.4  [+0.0, +0.0]
+    antenna_fault                          n  1440   86.9 ->  86.9  [+0.0, +0.0]
+    benign_interference                    n  1440   91.7 ->  91.7  [+0.0, +0.0]
+    sweeping_jammer                        n  1440   95.8 ->  95.8  [+0.0, +0.0]
+    tone_jamming                           n  2880   98.7 ->  98.7  [-0.1, +0.2]
+    airframe_shadowing                     n  1440   96.0 ->  96.0  [+0.0, +0.0]
+    jamming+path_loss                      n   472   94.1 ->  94.1  [+0.0, +0.0]
+    noise_burst+antenna_fault              n   700   96.3 ->  96.3  [+0.0, +0.0]
+    sweeping_jammer+path_loss              n   518   90.0 ->  90.0  [+0.0, +0.0]
+    spoofing+noise_burst                   n   760   96.6 ->  96.6  [+0.0, +0.0]
+    reactive_jamming+path_loss             n   474   93.2 ->  93.2  [+0.0, +0.0]
+    jamming+antenna_fault                  n   864   98.3 ->  98.3  [+0.0, +0.0]
+    spoofing+sweeping_jammer               n   864   96.5 ->  96.5  [+0.0, +0.0]
+    benign_interference+noise_burst        n   770   96.8 ->  96.8  [+0.0, +0.0]
+    tone_jamming+path_loss                 n   468   88.9 ->  88.9  [+0.0, +0.0]
+    jamming+spoofing+benign_interference   n   864   98.8 ->  98.7  [-0.3, +0.0]
+    noise_burst+spoofing+antenna_fault     n   692   96.4 ->  96.4  [+0.0, +0.0]
+    jamming+airframe_shadowing             n   864   98.4 ->  98.4  [+0.0, +0.0]
+    jamming+airframe_shadowing+path_loss   n   516   94.2 ->  94.2  [+0.0, +0.0]
+    tone_jamming+spoofing+airframe_shadowing n   864   99.3 ->  99.3  [+0.0, +0.0]
+  comb set                                 n  2736   74.5 ->  87.4  [+11.3, +14.6]
+  comb set, delivered after onset          n  2736   26.3 ->  26.7  [+0.2, +0.7]
+KPI 6, fresh clean flights: with a change 66 -> 66 of 1800 (one-sided 95% bound 4.48% -> 4.48%, against 5%); false changes per hour 403.3 -> 403.3
+Test done in 52.5 min.

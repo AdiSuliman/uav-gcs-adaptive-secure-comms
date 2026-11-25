@@ -1,0 +1,266 @@
+
+=== RULE ROWS ON THE FRESH SET ===
+Reproduction 23-Nov-2026 10:42:24, 31.9 min:
+Off reproduces the registered rows and keep+st+rate reproduces the rule fix's test rows (none, rule_esc, blind_esc, rule_core, blind_core) on single, follower, combined: exact
+Fresh read 23-Nov-2026 12:04:14 | setting keep+st+rate | rule fix test reading 9f8f4e79ed4880647a6bbda7ef50dae194e5cf5bc6aa2d67a110fcfd7470d85c | fresh sets single, follower, combined | clean flights 1800
+Registered confirmation (3 claims, one-sided, Holm at 0.05; a claim is confirmed when it passes Holm and every guard of its row holds):
+  esc_recovered   rule_esc, recovered among the recoverable            n 29018, 720 clusters: off 73.6% -> on 80.9%, gain +7.29 points, one-sided 95% lower bound +6.35, p 0.0000 (bootstrap): Holm passes
+  core_narrowband rule_core, PER reduction vs no response, tone_jamming n  2720, 144 clusters: off 42.6% -> on 53.3%, gain +10.71 points, one-sided 95% lower bound +9.13, p 0.0000 (bootstrap): Holm passes
+  core_wideband   rule_core, PER reduction vs no response, jamming     n  2640, 144 clusters: off 46.4% -> on 52.2%, gain +5.78 points, one-sided 95% lower bound +5.13, p 0.0000 (bootstrap): Holm passes
+  guards of rule_esc: (b) every threat with at least 10 episodes: ok
+    (c) pooled held +10.67 (lb +9.75), recovered +7.29 (lb +6.38): ok
+    (d) rule_esc, clean flights with a change 131 -> 131 of 1800, one-sided bound 8.37% -> 8.37% (limit 8.37%), share +0.00 points (limit +1.0): ok
+  guards of rule_core: (e) pooled held +4.82 (lb +3.80): ok
+    (d) rule_core, clean flights with a change 132 -> 132 of 1800, one-sided bound 8.42% -> 8.42% (limit 8.42%), share +0.00 points (limit +1.0): ok
+  -> esc_recovered: CONFIRMED
+  -> core_narrowband: CONFIRMED
+  -> core_wideband: CONFIRMED
+Descriptive: recovered and held among the recoverable (single + follower + combined), off -> on [95% interval of the paired difference]:
+  rule_esc, recovered                      n 29018   73.6 ->  80.9  [+6.2, +8.5]
+  rule_esc, held                           n 29018   66.2 ->  76.9  [+9.5, +11.8]
+  blind_esc, recovered                     n 29018   75.9 ->  77.1  [+1.0, +1.3]
+  blind_esc, held                          n 29018   73.7 ->  75.4  [+1.5, +2.1]
+  rule_core, recovered                     n 29018   55.8 ->  58.3  [+1.4, +3.9]
+  rule_core, held                          n 29018   49.2 ->  54.1  [+3.6, +6.0]
+  blind_core, recovered                    n 29018   56.5 ->  56.4  [-0.4, +0.0]
+  blind_core, held                         n 29018   48.6 ->  52.0  [+2.6, +4.4]
+rule_esc, recovered per threat:
+    jamming                                n  2880   77.9 ->  84.5  [+4.5, +8.6]
+    noise_burst                            n  1214   83.5 ->  83.9  [+0.0, +0.8]
+    reactive_jamming                       n  2880   70.1 ->  94.0  [+19.0, +29.0]
+    path_loss                              n   834   78.8 ->  78.8  [+0.0, +0.0]
+    spoofing                               n  2880   82.3 ->  93.0  [+7.8, +13.5]
+    antenna_fault                          n  1440   85.5 ->  85.5  [+0.0, +0.0]
+    benign_interference                    n  1440   80.3 ->  86.2  [+4.1, +7.8]
+    sweeping_jammer                        n  1440   89.9 ->  89.9  [+0.0, +0.0]
+    tone_jamming                           n  2880   84.9 ->  89.2  [+2.6, +6.0]
+    airframe_shadowing                     n  1440   97.2 ->  97.2  [+0.0, +0.0]
+    jamming+path_loss                      n   472    2.8 ->  15.7  [+9.5, +16.4]
+    noise_burst+antenna_fault              n   700   64.1 ->  65.0  [+0.1, +1.8]
+    sweeping_jammer+path_loss              n   518   23.2 ->  29.9  [+4.3, +9.7]
+    spoofing+noise_burst                   n   760   74.3 ->  79.1  [+2.7, +6.9]
+    reactive_jamming+path_loss             n   474    3.0 ->  25.9  [+18.3, +27.2]
+    jamming+antenna_fault                  n   864   62.7 ->  75.3  [+9.6, +15.7]
+    spoofing+sweeping_jammer               n   864   83.1 ->  86.3  [+1.5, +5.2]
+    benign_interference+noise_burst        n   770   76.6 ->  78.8  [+1.0, +3.6]
+    tone_jamming+path_loss                 n   468    3.4 ->  19.4  [+12.2, +19.9]
+    jamming+spoofing+benign_interference   n   864   75.0 ->  85.9  [+8.0, +14.1]
+    noise_burst+spoofing+antenna_fault     n   692   57.7 ->  62.6  [+2.8, +7.1]
+    jamming+airframe_shadowing             n   864   82.3 ->  85.4  [+1.5, +5.0]
+    jamming+airframe_shadowing+path_loss   n   516    1.2 ->  13.6  [+8.7, +16.4]
+    tone_jamming+spoofing+airframe_shadowing n   864   85.0 ->  87.6  [+1.3, +4.1]
+rule_core, recovered per threat:
+    jamming                                n  2880   64.8 ->  64.8  [-1.9, +2.0]
+    noise_burst                            n  1214   10.0 ->  10.0  [+0.0, +0.0]
+    reactive_jamming                       n  2880   61.8 ->  66.0  [+0.4, +8.5]
+    path_loss                              n   834   45.9 ->  45.9  [+0.0, +0.0]
+    spoofing                               n  2880   70.6 ->  74.2  [+0.1, +7.3]
+    antenna_fault                          n  1440   87.4 ->  87.4  [+0.0, +0.0]
+    benign_interference                    n  1440   84.3 ->  89.6  [+3.3, +7.5]
+    sweeping_jammer                        n  1440   35.3 ->  35.3  [+0.0, +0.0]
+    tone_jamming                           n  2880   65.5 ->  65.1  [-3.3, +2.8]
+    airframe_shadowing                     n  1440   97.2 ->  97.2  [+0.0, +0.0]
+    jamming+path_loss                      n   472   22.5 ->  27.5  [+2.9, +7.5]
+    noise_burst+antenna_fault              n   700    1.7 ->   1.7  [+0.0, +0.0]
+    sweeping_jammer+path_loss              n   518    5.0 ->   5.0  [+0.0, +0.0]
+    spoofing+noise_burst                   n   760    3.7 ->   3.7  [+0.0, +0.0]
+    reactive_jamming+path_loss             n   474    5.7 ->  27.4  [+18.1, +25.6]
+    jamming+antenna_fault                  n   864   80.1 ->  92.4  [+9.0, +15.7]
+    spoofing+sweeping_jammer               n   864   26.6 ->  29.5  [+1.0, +5.2]
+    benign_interference+noise_burst        n   770    3.4 ->   3.4  [+0.0, +0.0]
+    tone_jamming+path_loss                 n   468   14.5 ->  29.5  [+11.6, +18.3]
+    jamming+spoofing+benign_interference   n   864   90.2 ->  94.9  [+3.1, +6.6]
+    noise_burst+spoofing+antenna_fault     n   692    1.7 ->   1.7  [+0.0, +0.0]
+    jamming+airframe_shadowing             n   864   97.2 ->  98.6  [+0.6, +2.3]
+    jamming+airframe_shadowing+path_loss   n   516   17.4 ->  20.9  [+1.5, +5.7]
+    tone_jamming+spoofing+airframe_shadowing n   864   93.4 ->  99.3  [+3.5, +8.4]
+Fresh clean flights (system level): flights with a change, one-sided 95% bound, false changes per hour, off -> on:
+  rule_esc     131 -> 131 of 1800 (7.28% -> 7.28%; bound 8.37% -> 8.37%); 543.3 -> 543.3 per hour
+  blind_esc    101 -> 101 of 1800 (5.61% -> 5.61%; bound 6.59% -> 6.59%); 443.3 -> 443.3 per hour
+  rule_core    132 -> 132 of 1800 (7.33% -> 7.33%; bound 8.42% -> 8.42%); 776.7 -> 790.0 per hour
+  blind_core   102 -> 102 of 1800 (5.67% -> 5.67%; bound 6.65% -> 6.65%); 673.3 -> 706.7 per hour
+
+Lecturer KPIs on the fresh set, rule rows off (descriptive):
+
+--- Revised-proposal KPIs: PER vs the static link, recovery time from detection, goodput in bit/s (threat sets pooled; jamming threats: jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming) ---
+Full action set (the 36 configurations):
+PER after onset vs the static link (no response), paired by episode, 95% bootstrap over flight geometries; recoverable episodes: some configuration of the 36 restores the geometry. Target (lecturer) >= 30% reduction for rule + escalation in each of the two jamming scenarios: MET (committed) when the 95% lower bound clears it, MET (not committed) when only the point does, NOT MET otherwise:
+  PRIMARY narrowband (tone_jamming), 2880 recoverable episodes, static PER 99.80%: rule + escalation reduction 55.1% [49.8, 60.3] -> MET (committed)
+  PRIMARY wideband (jamming), 2880 recoverable episodes, static PER 99.89%: rule + escalation reduction 51.9% [46.3, 57.3] -> MET (committed)
+  extension, the five jamming threats pooled (11294 recoverable episodes; jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming):
+    rule + escalation                          PER  46.16% vs  91.93% static: reduction   49.8% [45.0, 54.7] -> MET (committed)
+    no detector + escalation                   PER  41.91% vs  91.93% static: reduction   54.4% [50.5, 58.0]
+    DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed) PER  24.97% vs  91.93% static: reduction   72.8% [70.5, 75.0]
+  per jamming threat, reduction % [95%] (rule + escalation | no detector + escalation | DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed)):
+    jamming (wideband)             2880, static PER  99.89%: 51.9 [46.3, 57.3] | 56.1 [52.4, 59.5] | 76.2 [73.3, 78.8]
+    noise_burst                    1214, static PER  98.48%: 57.7 [54.7, 60.7] | 44.9 [40.8, 48.9] | 69.9 [66.7, 72.8]
+    reactive_jamming               2880, static PER  99.90%: 44.5 [39.7, 49.0] | 54.0 [50.5, 57.2] | 71.0 [70.0, 71.9]
+    sweeping_jammer                1440, static PER  38.82%: 22.1 [17.5, 27.7] | 27.5 [22.0, 33.4] | 51.7 [46.4, 56.9]
+    tone_jamming (narrowband)      2880, static PER  99.80%: 55.1 [49.8, 60.3] | 62.3 [58.8, 65.7] | 76.7 [73.6, 79.1]
+  CNN contribution (rule + escalation vs the same escalation without the detector, the same 11294 episodes): PER reduction -10.1% [-15.8, -4.9], goodput -3529 bit/s [-4735, -2375]; recovery time on the 11294 recoverable jamming episodes, with vs without the detector: onset -> detection 1 / 4 (20 / 80 ms, never 0.0%) vs 4 / 7 (80 / 140 ms, never 5.4%), detection -> PER restored 2 / 2 (40 / 40 ms, never 12.6%) vs 2 / 2 (40 / 40 ms, never 11.4%)
+  onset -> restored (descriptive, selects nothing; D121 item 10), rule + escalation vs the same escalation without the detector, paired on the 8751 episodes both rows recover, with minus without the detector: median -3 [-3, -3] cycles (-60 ms), mean -2.76 [-2.95, -2.57] cycles (-55.3 ms), 95% bootstrap over flight geometries; of the 11294 recoverable jamming episodes recovered by both 77.5%, by the row with the detector only 9.9%, by the other only 6.4%, by neither 6.3%
+Recovery time (lecturer): from the first confirmed alarm's frame until the packet loss stays <= 2x clean for 5 consecutive cycles; beside it the onset-to-detection time and T_rec from onset (BER and packet loss); median / p90 [cycles of 20 ms] (never %):
+  recoverable threat episodes (29018): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 5 (20 / 100 ms, never 1.7%) | 0 / 0 (0 / 0 ms, never 59.4%) | 0 / 0 (0 / 0 ms, never 88.3%)
+    no detector + escalation                     4 / 8 (80 / 160 ms, never 13.6%) | 2 / 2 (40 / 40 ms, never 17.7%) | 6 / 12 (120 / 240 ms, never 24.1%)
+    rule + escalation                            1 / 5 (20 / 100 ms, never 1.7%) | 2 / 2 (40 / 40 ms, never 18.5%) | 3 / 9 (60 / 180 ms, never 26.4%)
+    DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed) 1 / 5 (20 / 100 ms, never 1.7%) | 2 / 5 (40 / 100 ms, never 2.9%) | 4 / 9 (80 / 180 ms, never 3.8%)
+  recoverable jamming episodes (11294): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 4 (20 / 80 ms, never 0.0%) | 0 / 0 (0 / 0 ms, never 61.5%) | 0 / 0 (0 / 0 ms, never 96.9%)
+    no detector + escalation                     4 / 7 (80 / 140 ms, never 5.4%) | 2 / 2 (40 / 40 ms, never 11.4%) | 6 / 11 (120 / 220 ms, never 16.3%)
+    rule + escalation                            1 / 4 (20 / 80 ms, never 0.0%) | 2 / 2 (40 / 40 ms, never 12.6%) | 4 / 8 (80 / 160 ms, never 20.2%)
+    DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed) 1 / 4 (20 / 80 ms, never 0.0%) | 2 / 5 (40 / 100 ms, never 1.0%) | 6 / 9 (120 / 180 ms, never 2.0%)
+Goodput after onset in bit/s (nominal payload rate 50.00 kb/s: payload bits per frame per decision cycle; a frame delivers goodput factor x (1 - packet loss), none before a coded link's first packet), mean [95%] beside the normalized goodput:
+  no response                                  threat episodes (32256) 6.09 kb/s [5.58 kb/s, 6.60 kb/s], normalized 0.174 | recoverable jamming (11294) 4.03 kb/s [3.65 kb/s, 4.42 kb/s], normalized 0.118
+  no detector + escalation                     threat episodes (32256) 23.78 kb/s [22.29 kb/s, 25.19 kb/s], normalized 0.691 | recoverable jamming (11294) 28.98 kb/s [27.14 kb/s, 30.65 kb/s], normalized 0.850
+  rule + escalation                            threat episodes (32256) 21.47 kb/s [19.69 kb/s, 23.25 kb/s], normalized 0.612 | recoverable jamming (11294) 25.45 kb/s [23.01 kb/s, 27.93 kb/s], normalized 0.732
+  DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed) threat episodes (32256) 21.62 kb/s [20.62 kb/s, 22.60 kb/s], normalized 0.654 | recoverable jamming (11294) 23.42 kb/s [22.32 kb/s, 24.45 kb/s], normalized 0.724
+Core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce} (the revised proposal's predefined actions, channel switching and transmission-rate adaptation; escalation channel_switch+rate_reduce -> rate_reduce -> channel_switch), the same episodes and static link; primary: the episodes a core configuration recovers (20316 recoverable threat episodes, 8638 jamming):
+Core action set: PER after onset vs the static link (no response), paired by episode, 95% bootstrap over flight geometries; recoverable episodes: some configuration of the core action set restores the geometry. Target (lecturer) >= 30% reduction for core rule + escalation in each of the two jamming scenarios: MET (committed) when the 95% lower bound clears it, MET (not committed) when only the point does, NOT MET otherwise:
+  PRIMARY narrowband (tone_jamming), 2720 recoverable episodes, static PER 99.79%: core: rule + escalation, with the lost-branch gate reduction 42.6% [39.9, 45.3] -> MET (committed)
+  PRIMARY wideband (jamming), 2640 recoverable episodes, static PER 99.88%: core: rule + escalation, with the lost-branch gate reduction 46.4% [44.3, 48.4] -> MET (committed)
+  extension, the five jamming threats pooled (8638 recoverable episodes; jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming):
+    core: rule + escalation, with the lost-branch gate PER  55.59% vs  96.81% static: reduction   42.6% [39.8, 45.2] -> MET (committed)
+    core: no detector + escalation             PER  50.54% vs  96.81% static: reduction   47.8% [45.3, 50.1]
+  per jamming threat, reduction % [95%] (core: rule + escalation, with the lost-branch gate | core: no detector + escalation):
+    jamming (wideband)             2640, static PER  99.88%: 46.4 [44.3, 48.4] | 49.4 [47.1, 51.6]
+    noise_burst                     122, static PER  91.47%: 37.2 [30.3, 44.2] | 25.2 [20.4, 30.3]
+    reactive_jamming               2636, static PER  99.89%: 38.6 [34.9, 42.3] | 48.9 [46.5, 51.2]
+    sweeping_jammer                 520, static PER  51.30%: 46.3 [37.1, 54.7] | 13.8 [8.4, 20.1]
+    tone_jamming (narrowband)      2720, static PER  99.79%: 42.6 [39.9, 45.3] | 49.5 [47.3, 51.5]
+  CNN contribution (core rule + escalation vs the same core escalation without the detector, the same 8638 episodes): PER reduction -10.0% [-12.0, -8.1], goodput +4066 bit/s [+3424, +4686]; recovery time on the 8638 recoverable jamming episodes, with vs without the detector: onset -> detection 1 / 4 (20 / 80 ms, never 0.0%) vs 4 / 6 (80 / 120 ms, never 5.8%), detection -> PER restored 0 / 7 (0 / 140 ms, never 21.5%) vs 2 / 2 (40 / 40 ms, never 22.3%)
+  onset -> restored (descriptive, selects nothing; D121 item 10), core rule + escalation vs the same core escalation without the detector, paired on the 6086 episodes both rows recover, with minus without the detector: median 0 [0, 0] cycles (0 ms), mean -0.47 [-0.98, 0.03] cycles (-9.5 ms), 95% bootstrap over flight geometries; of the 8638 recoverable jamming episodes recovered by both 70.5%, by the row with the detector only 8.0%, by the other only 2.7%, by neither 18.8%
+Core action set: Recovery time (lecturer): from the first confirmed alarm's frame until the packet loss stays <= 2x clean for 5 consecutive cycles; beside it the onset-to-detection time and T_rec from onset (BER and packet loss); median / p90 [cycles of 20 ms] (never %):
+  recoverable threat episodes (20316): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 6 (20 / 120 ms, never 2.4%) | 0 / 0 (0 / 0 ms, never 54.8%) | 0 / 0 (0 / 0 ms, never 83.3%)
+    core: no detector + escalation               4 / 7 (80 / 140 ms, never 18.4%) | 2 / 2 (40 / 40 ms, never 14.6%) | 6 / 8 (120 / 160 ms, never 19.3%)
+    core: rule + escalation, with the lost-branch gate 1 / 7 (20 / 140 ms, never 2.4%) | 0 / 7 (0 / 140 ms, never 15.4%) | 8 / 12 (160 / 240 ms, never 20.3%)
+  recoverable jamming episodes (8638): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 4 (20 / 80 ms, never 0.0%) | 0 / 0 (0 / 0 ms, never 59.9%) | 0 / 0 (0 / 0 ms, never 95.9%)
+    core: no detector + escalation               4 / 6 (80 / 120 ms, never 5.8%) | 2 / 2 (40 / 40 ms, never 22.3%) | 6 / 8 (120 / 160 ms, never 29.9%)
+    core: rule + escalation, with the lost-branch gate 1 / 4 (20 / 80 ms, never 0.0%) | 0 / 7 (0 / 140 ms, never 21.5%) | 8 / 13 (160 / 260 ms, never 28.7%)
+Core action set: Goodput after onset in bit/s (nominal payload rate 50.00 kb/s: payload bits per frame per decision cycle; a frame delivers goodput factor x (1 - packet loss), none before a coded link's first packet), mean [95%] beside the normalized goodput:
+  no response                                  threat episodes (32256) 6.09 kb/s [5.59 kb/s, 6.60 kb/s], normalized 0.174 | recoverable jamming (8638) 1.59 kb/s [1.19 kb/s, 2.04 kb/s], normalized 0.047
+  core: no detector + escalation               threat episodes (32256) 9.15 kb/s [8.59 kb/s, 9.73 kb/s], normalized 0.263 | recoverable jamming (8638) 8.32 kb/s [7.72 kb/s, 8.92 kb/s], normalized 0.250
+  core: rule + escalation, with the lost-branch gate threat episodes (32256) 11.31 kb/s [10.58 kb/s, 12.10 kb/s], normalized 0.325 | recoverable jamming (8638) 12.38 kb/s [11.30 kb/s, 13.44 kb/s], normalized 0.371
+Core action set, second line: the episodes any of the 36 configurations recovers (29018 recoverable threat episodes, 11294 jamming; those only a configuration outside the core set restores kept in):
+Core action set (recoverable by the 36): PER after onset vs the static link (no response), paired by episode, 95% bootstrap over flight geometries; recoverable episodes: some configuration of the 36 restores the geometry. Target (lecturer) >= 30% reduction for core rule + escalation in each of the two jamming scenarios: MET (committed) when the 95% lower bound clears it, MET (not committed) when only the point does, NOT MET otherwise:
+  PRIMARY narrowband (tone_jamming), 2880 recoverable episodes, static PER 99.80%: core: rule + escalation, with the lost-branch gate reduction 42.3% [39.5, 44.9] -> MET (committed)
+  PRIMARY wideband (jamming), 2880 recoverable episodes, static PER 99.89%: core: rule + escalation, with the lost-branch gate reduction 45.0% [43.0, 46.8] -> MET (committed)
+  extension, the five jamming threats pooled (11294 recoverable episodes; jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming):
+    core: rule + escalation, with the lost-branch gate PER  57.53% vs  91.93% static: reduction   37.4% [35.4, 39.5] -> MET (committed)
+    core: no detector + escalation             PER  53.97% vs  91.93% static: reduction   41.3% [39.3, 43.2]
+  per jamming threat, reduction % [95%] (core: rule + escalation, with the lost-branch gate | core: no detector + escalation):
+    jamming (wideband)             2880, static PER  99.89%: 45.0 [43.0, 46.8] | 47.6 [45.4, 49.5]
+    noise_burst                    1214, static PER  98.48%: 7.1 [6.0, 8.4] | 5.9 [5.0, 6.8]
+    reactive_jamming               2880, static PER  99.90%: 37.5 [34.1, 40.6] | 47.2 [44.9, 49.2]
+    sweeping_jammer                1440, static PER  38.82%: 37.4 [31.9, 42.6] | 16.5 [12.4, 20.9]
+    tone_jamming (narrowband)      2880, static PER  99.80%: 42.3 [39.5, 44.9] | 48.6 [46.6, 50.6]
+  CNN contribution (core rule + escalation vs the same core escalation without the detector, the same 11294 episodes): PER reduction -6.6% [-8.0, -5.3], goodput +2872 bit/s [+2466, +3304]; recovery time on the 11294 recoverable jamming episodes, with vs without the detector: onset -> detection 1 / 4 (20 / 80 ms, never 0.0%) vs 4 / 7 (80 / 140 ms, never 5.4%), detection -> PER restored 0 / 7 (0 / 140 ms, never 30.1%) vs 0 / 2 (0 / 40 ms, never 31.6%)
+  onset -> restored (descriptive, selects nothing; D121 item 10), core rule + escalation vs the same core escalation without the detector, paired on the 7070 episodes both rows recover, with minus without the detector: median 0 [-1, 0] cycles (0 ms), mean -0.90 [-1.34, -0.47] cycles (-18.1 ms), 95% bootstrap over flight geometries; of the 11294 recoverable jamming episodes recovered by both 62.6%, by the row with the detector only 7.3%, by the other only 2.1%, by neither 28.0%
+Core action set (recoverable by the 36): Recovery time (lecturer): from the first confirmed alarm's frame until the packet loss stays <= 2x clean for 5 consecutive cycles; beside it the onset-to-detection time and T_rec from onset (BER and packet loss); median / p90 [cycles of 20 ms] (never %):
+  recoverable threat episodes (29018): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 5 (20 / 100 ms, never 1.7%) | 0 / 0 (0 / 0 ms, never 59.4%) | 0 / 0 (0 / 0 ms, never 88.3%)
+    core: no detector + escalation               4 / 8 (80 / 160 ms, never 13.6%) | 2 / 2 (40 / 40 ms, never 31.6%) | 6 / 8 (120 / 160 ms, never 43.5%)
+    core: rule + escalation, with the lost-branch gate 1 / 5 (20 / 100 ms, never 1.7%) | 0 / 7 (0 / 140 ms, never 30.0%) | 8 / 12 (160 / 240 ms, never 44.2%)
+  recoverable jamming episodes (11294): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 4 (20 / 80 ms, never 0.0%) | 0 / 0 (0 / 0 ms, never 61.5%) | 0 / 0 (0 / 0 ms, never 96.9%)
+    core: no detector + escalation               4 / 7 (80 / 140 ms, never 5.4%) | 0 / 2 (0 / 40 ms, never 31.6%) | 6 / 8 (120 / 160 ms, never 46.4%)
+    core: rule + escalation, with the lost-branch gate 1 / 4 (20 / 80 ms, never 0.0%) | 0 / 7 (0 / 140 ms, never 30.1%) | 8 / 13 (160 / 260 ms, never 45.4%)
+Core action set (recoverable by the 36): Goodput after onset in bit/s (nominal payload rate 50.00 kb/s: payload bits per frame per decision cycle; a frame delivers goodput factor x (1 - packet loss), none before a coded link's first packet), mean [95%] beside the normalized goodput:
+  no response                                  threat episodes (32256) 6.09 kb/s [5.58 kb/s, 6.63 kb/s], normalized 0.174 | recoverable jamming (11294) 4.03 kb/s [3.65 kb/s, 4.42 kb/s], normalized 0.118
+  core: no detector + escalation               threat episodes (32256) 9.15 kb/s [8.58 kb/s, 9.73 kb/s], normalized 0.263 | recoverable jamming (11294) 8.47 kb/s [7.95 kb/s, 9.02 kb/s], normalized 0.247
+  core: rule + escalation, with the lost-branch gate threat episodes (32256) 11.31 kb/s [10.53 kb/s, 12.11 kb/s], normalized 0.325 | recoverable jamming (11294) 11.35 kb/s [10.40 kb/s, 12.19 kb/s], normalized 0.330
+
+Lecturer KPIs on the fresh set, rule rows with keep+st+rate (descriptive):
+
+--- Revised-proposal KPIs: PER vs the static link, recovery time from detection, goodput in bit/s (threat sets pooled; jamming threats: jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming) ---
+Full action set (the 36 configurations):
+PER after onset vs the static link (no response), paired by episode, 95% bootstrap over flight geometries; recoverable episodes: some configuration of the 36 restores the geometry. Target (lecturer) >= 30% reduction for rule + escalation in each of the two jamming scenarios: MET (committed) when the 95% lower bound clears it, MET (not committed) when only the point does, NOT MET otherwise:
+  PRIMARY narrowband (tone_jamming), 2880 recoverable episodes, static PER 99.80%: rule + escalation reduction 61.4% [56.7, 65.9] -> MET (committed)
+  PRIMARY wideband (jamming), 2880 recoverable episodes, static PER 99.89%: rule + escalation reduction 56.4% [50.8, 61.7] -> MET (committed)
+  extension, the five jamming threats pooled (11294 recoverable episodes; jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming):
+    rule + escalation                          PER  37.59% vs  91.93% static: reduction   59.1% [55.2, 62.9] -> MET (committed)
+    no detector + escalation                   PER  41.70% vs  91.93% static: reduction   54.6% [50.7, 58.2]
+    DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed) PER  24.97% vs  91.93% static: reduction   72.8% [70.5, 75.0]
+  per jamming threat, reduction % [95%] (rule + escalation | no detector + escalation | DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed)):
+    jamming (wideband)             2880, static PER  99.89%: 56.4 [50.8, 61.7] | 56.3 [52.6, 59.7] | 76.2 [73.3, 78.8]
+    noise_burst                    1214, static PER  98.48%: 59.1 [56.4, 61.7] | 45.4 [41.3, 49.3] | 69.9 [66.7, 72.8]
+    reactive_jamming               2880, static PER  99.90%: 66.8 [64.2, 69.1] | 54.5 [51.0, 57.6] | 71.0 [70.0, 71.9]
+    sweeping_jammer                1440, static PER  38.82%: 22.1 [17.5, 27.7] | 27.5 [22.1, 33.4] | 51.7 [46.4, 56.9]
+    tone_jamming (narrowband)      2880, static PER  99.80%: 61.4 [56.7, 65.9] | 62.3 [58.8, 65.7] | 76.7 [73.6, 79.1]
+  CNN contribution (rule + escalation vs the same escalation without the detector, the same 11294 episodes): PER reduction 9.9% [6.2, 13.4], goodput -8942 bit/s [-9733, -8177]; recovery time on the 11294 recoverable jamming episodes, with vs without the detector: onset -> detection 1 / 4 (20 / 80 ms, never 0.0%) vs 4 / 7 (80 / 140 ms, never 5.4%), detection -> PER restored 2 / 3 (40 / 60 ms, never 7.2%) vs 2 / 2 (40 / 40 ms, never 11.1%)
+  onset -> restored (descriptive, selects nothing; D121 item 10), rule + escalation vs the same escalation without the detector, paired on the 9126 episodes both rows recover, with minus without the detector: median -3 [-3, -3] cycles (-60 ms), mean -2.80 [-2.98, -2.62] cycles (-55.9 ms), 95% bootstrap over flight geometries; of the 11294 recoverable jamming episodes recovered by both 80.8%, by the row with the detector only 12.0%, by the other only 3.3%, by neither 3.9%
+Recovery time (lecturer): from the first confirmed alarm's frame until the packet loss stays <= 2x clean for 5 consecutive cycles; beside it the onset-to-detection time and T_rec from onset (BER and packet loss); median / p90 [cycles of 20 ms] (never %):
+  recoverable threat episodes (29018): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 5 (20 / 100 ms, never 1.7%) | 0 / 0 (0 / 0 ms, never 59.4%) | 0 / 0 (0 / 0 ms, never 88.3%)
+    no detector + escalation                     4 / 8 (80 / 160 ms, never 13.6%) | 2 / 2 (40 / 40 ms, never 16.7%) | 6 / 13 (120 / 260 ms, never 22.9%)
+    rule + escalation                            1 / 5 (20 / 100 ms, never 1.7%) | 2 / 3 (40 / 60 ms, never 13.7%) | 3 / 9 (60 / 180 ms, never 19.1%)
+    DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed) 1 / 5 (20 / 100 ms, never 1.7%) | 2 / 5 (40 / 100 ms, never 2.9%) | 4 / 9 (80 / 180 ms, never 3.8%)
+  recoverable jamming episodes (11294): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 4 (20 / 80 ms, never 0.0%) | 0 / 0 (0 / 0 ms, never 61.5%) | 0 / 0 (0 / 0 ms, never 96.9%)
+    no detector + escalation                     4 / 7 (80 / 140 ms, never 5.4%) | 2 / 2 (40 / 40 ms, never 11.1%) | 6 / 11 (120 / 220 ms, never 16.0%)
+    rule + escalation                            1 / 4 (20 / 80 ms, never 0.0%) | 2 / 3 (40 / 60 ms, never 7.2%) | 4 / 8 (80 / 160 ms, never 11.3%)
+    DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed) 1 / 4 (20 / 80 ms, never 0.0%) | 2 / 5 (40 / 100 ms, never 1.0%) | 6 / 9 (120 / 180 ms, never 2.0%)
+Goodput after onset in bit/s (nominal payload rate 50.00 kb/s: payload bits per frame per decision cycle; a frame delivers goodput factor x (1 - packet loss), none before a coded link's first packet), mean [95%] beside the normalized goodput:
+  no response                                  threat episodes (32256) 6.09 kb/s [5.58 kb/s, 6.60 kb/s], normalized 0.174 | recoverable jamming (11294) 4.03 kb/s [3.65 kb/s, 4.42 kb/s], normalized 0.118
+  no detector + escalation                     threat episodes (32256) 23.83 kb/s [22.37 kb/s, 25.23 kb/s], normalized 0.693 | recoverable jamming (11294) 29.05 kb/s [27.23 kb/s, 30.72 kb/s], normalized 0.853
+  rule + escalation                            threat episodes (32256) 18.65 kb/s [17.24 kb/s, 20.07 kb/s], normalized 0.532 | recoverable jamming (11294) 20.11 kb/s [18.48 kb/s, 21.79 kb/s], normalized 0.584
+  DQN gamma=0.50 (selected) + link-budget completion (hybrid) (deployed) threat episodes (32256) 21.62 kb/s [20.62 kb/s, 22.60 kb/s], normalized 0.654 | recoverable jamming (11294) 23.42 kb/s [22.32 kb/s, 24.45 kb/s], normalized 0.724
+Core action set {no_action, channel_switch, rate_reduce, channel_switch+rate_reduce} (the revised proposal's predefined actions, channel switching and transmission-rate adaptation; escalation channel_switch+rate_reduce -> rate_reduce -> channel_switch), the same episodes and static link; primary: the episodes a core configuration recovers (20316 recoverable threat episodes, 8638 jamming):
+Core action set: PER after onset vs the static link (no response), paired by episode, 95% bootstrap over flight geometries; recoverable episodes: some configuration of the core action set restores the geometry. Target (lecturer) >= 30% reduction for core rule + escalation in each of the two jamming scenarios: MET (committed) when the 95% lower bound clears it, MET (not committed) when only the point does, NOT MET otherwise:
+  PRIMARY narrowband (tone_jamming), 2720 recoverable episodes, static PER 99.79%: core: rule + escalation, with the lost-branch gate reduction 53.3% [51.5, 55.0] -> MET (committed)
+  PRIMARY wideband (jamming), 2640 recoverable episodes, static PER 99.88%: core: rule + escalation, with the lost-branch gate reduction 52.2% [50.3, 54.0] -> MET (committed)
+  extension, the five jamming threats pooled (8638 recoverable episodes; jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming):
+    core: rule + escalation, with the lost-branch gate PER  44.50% vs  96.81% static: reduction   54.0% [52.0, 55.9] -> MET (committed)
+    core: no detector + escalation             PER  44.19% vs  96.81% static: reduction   54.4% [51.7, 56.8]
+  per jamming threat, reduction % [95%] (core: rule + escalation, with the lost-branch gate | core: no detector + escalation):
+    jamming (wideband)             2640, static PER  99.88%: 52.2 [50.3, 54.0] | 56.1 [53.7, 58.3]
+    noise_burst                     122, static PER  91.47%: 40.8 [34.1, 47.4] | 26.3 [21.5, 31.7]
+    reactive_jamming               2636, static PER  99.89%: 57.8 [55.6, 59.7] | 55.5 [53.0, 57.8]
+    sweeping_jammer                 520, static PER  51.30%: 48.0 [38.6, 56.6] | 14.0 [8.5, 20.3]
+    tone_jamming (narrowband)      2720, static PER  99.79%: 53.3 [51.5, 55.0] | 56.7 [54.4, 58.9]
+  CNN contribution (core rule + escalation vs the same core escalation without the detector, the same 8638 episodes): PER reduction -0.7% [-3.0, 1.5], goodput -403 bit/s [-632, -190]; recovery time on the 8638 recoverable jamming episodes, with vs without the detector: onset -> detection 1 / 4 (20 / 80 ms, never 0.0%) vs 4 / 6 (80 / 120 ms, never 5.8%), detection -> PER restored 0 / 7 (0 / 140 ms, never 20.6%) vs 2 / 2 (40 / 40 ms, never 22.2%)
+  onset -> restored (descriptive, selects nothing; D121 item 10), core rule + escalation vs the same core escalation without the detector, paired on the 6302 episodes both rows recover, with minus without the detector: median 0 [0, 0] cycles (0 ms), mean -0.93 [-1.35, -0.52] cycles (-18.6 ms), 95% bootstrap over flight geometries; of the 8638 recoverable jamming episodes recovered by both 73.0%, by the row with the detector only 6.4%, by the other only 0.3%, by neither 20.3%
+Core action set: Recovery time (lecturer): from the first confirmed alarm's frame until the packet loss stays <= 2x clean for 5 consecutive cycles; beside it the onset-to-detection time and T_rec from onset (BER and packet loss); median / p90 [cycles of 20 ms] (never %):
+  recoverable threat episodes (20316): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 6 (20 / 120 ms, never 2.4%) | 0 / 0 (0 / 0 ms, never 54.8%) | 0 / 0 (0 / 0 ms, never 83.3%)
+    core: no detector + escalation               4 / 7 (80 / 140 ms, never 18.4%) | 2 / 2 (40 / 40 ms, never 14.5%) | 6 / 8 (120 / 160 ms, never 19.5%)
+    core: rule + escalation, with the lost-branch gate 1 / 7 (20 / 140 ms, never 2.4%) | 0 / 7 (0 / 140 ms, never 13.2%) | 8 / 9 (160 / 180 ms, never 16.7%)
+  recoverable jamming episodes (8638): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 4 (20 / 80 ms, never 0.0%) | 0 / 0 (0 / 0 ms, never 59.9%) | 0 / 0 (0 / 0 ms, never 95.9%)
+    core: no detector + escalation               4 / 6 (80 / 120 ms, never 5.8%) | 2 / 2 (40 / 40 ms, never 22.2%) | 6 / 8 (120 / 160 ms, never 30.3%)
+    core: rule + escalation, with the lost-branch gate 1 / 4 (20 / 80 ms, never 0.0%) | 0 / 7 (0 / 140 ms, never 20.6%) | 8 / 9 (160 / 180 ms, never 27.4%)
+Core action set: Goodput after onset in bit/s (nominal payload rate 50.00 kb/s: payload bits per frame per decision cycle; a frame delivers goodput factor x (1 - packet loss), none before a coded link's first packet), mean [95%] beside the normalized goodput:
+  no response                                  threat episodes (32256) 6.09 kb/s [5.59 kb/s, 6.60 kb/s], normalized 0.174 | recoverable jamming (8638) 1.59 kb/s [1.19 kb/s, 2.04 kb/s], normalized 0.047
+  core: no detector + escalation               threat episodes (32256) 9.04 kb/s [8.52 kb/s, 9.59 kb/s], normalized 0.260 | recoverable jamming (8638) 7.95 kb/s [7.43 kb/s, 8.48 kb/s], normalized 0.239
+  core: rule + escalation, with the lost-branch gate threat episodes (32256) 8.48 kb/s [8.09 kb/s, 8.92 kb/s], normalized 0.241 | recoverable jamming (8638) 7.54 kb/s [7.15 kb/s, 7.96 kb/s], normalized 0.223
+Core action set, second line: the episodes any of the 36 configurations recovers (29018 recoverable threat episodes, 11294 jamming; those only a configuration outside the core set restores kept in):
+Core action set (recoverable by the 36): PER after onset vs the static link (no response), paired by episode, 95% bootstrap over flight geometries; recoverable episodes: some configuration of the 36 restores the geometry. Target (lecturer) >= 30% reduction for core rule + escalation in each of the two jamming scenarios: MET (committed) when the 95% lower bound clears it, MET (not committed) when only the point does, NOT MET otherwise:
+  PRIMARY narrowband (tone_jamming), 2880 recoverable episodes, static PER 99.80%: core: rule + escalation, with the lost-branch gate reduction 53.1% [51.3, 54.6] -> MET (committed)
+  PRIMARY wideband (jamming), 2880 recoverable episodes, static PER 99.89%: core: rule + escalation, with the lost-branch gate reduction 51.2% [49.3, 52.8] -> MET (committed)
+  extension, the five jamming threats pooled (11294 recoverable episodes; jamming, noise_burst, reactive_jamming, sweeping_jammer, tone_jamming):
+    core: rule + escalation, with the lost-branch gate PER  47.88% vs  91.93% static: reduction   47.9% [46.2, 49.6] -> MET (committed)
+    core: no detector + escalation             PER  47.93% vs  91.93% static: reduction   47.9% [45.7, 49.9]
+  per jamming threat, reduction % [95%] (core: rule + escalation, with the lost-branch gate | core: no detector + escalation):
+    jamming (wideband)             2880, static PER  99.89%: 51.2 [49.3, 52.8] | 55.2 [52.9, 57.2]
+    noise_burst                    1214, static PER  98.48%: 9.1 [7.8, 10.4] | 6.9 [6.0, 7.9]
+    reactive_jamming               2880, static PER  99.90%: 56.8 [54.8, 58.5] | 54.7 [52.3, 56.7]
+    sweeping_jammer                1440, static PER  38.82%: 41.8 [36.0, 47.2] | 17.3 [13.0, 21.8]
+    tone_jamming (narrowband)      2880, static PER  99.80%: 53.1 [51.3, 54.6] | 56.7 [54.4, 58.7]
+  CNN contribution (core rule + escalation vs the same core escalation without the detector, the same 11294 episodes): PER reduction 0.1% [-1.6, 1.9], goodput -746 bit/s [-940, -546]; recovery time on the 11294 recoverable jamming episodes, with vs without the detector: onset -> detection 1 / 4 (20 / 80 ms, never 0.0%) vs 4 / 7 (80 / 140 ms, never 5.4%), detection -> PER restored 0 / 7 (0 / 140 ms, never 29.2%) vs 0 / 2 (0 / 40 ms, never 31.4%)
+  onset -> restored (descriptive, selects nothing; D121 item 10), core rule + escalation vs the same core escalation without the detector, paired on the 7298 episodes both rows recover, with minus without the detector: median 0 [-1, 0] cycles (0 ms), mean -1.34 [-1.69, -0.97] cycles (-26.8 ms), 95% bootstrap over flight geometries; of the 11294 recoverable jamming episodes recovered by both 64.6%, by the row with the detector only 6.1%, by the other only 0.3%, by neither 28.9%
+Core action set (recoverable by the 36): Recovery time (lecturer): from the first confirmed alarm's frame until the packet loss stays <= 2x clean for 5 consecutive cycles; beside it the onset-to-detection time and T_rec from onset (BER and packet loss); median / p90 [cycles of 20 ms] (never %):
+  recoverable threat episodes (29018): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 5 (20 / 100 ms, never 1.7%) | 0 / 0 (0 / 0 ms, never 59.4%) | 0 / 0 (0 / 0 ms, never 88.3%)
+    core: no detector + escalation               4 / 8 (80 / 160 ms, never 13.6%) | 2 / 2 (40 / 40 ms, never 31.5%) | 6 / 8 (120 / 160 ms, never 43.6%)
+    core: rule + escalation, with the lost-branch gate 1 / 5 (20 / 100 ms, never 1.7%) | 0 / 7 (0 / 140 ms, never 28.4%) | 8 / 9 (160 / 180 ms, never 41.7%)
+  recoverable jamming episodes (11294): onset -> detection | detection -> PER restored | T_rec from onset
+    no response                                  1 / 4 (20 / 80 ms, never 0.0%) | 0 / 0 (0 / 0 ms, never 61.5%) | 0 / 0 (0 / 0 ms, never 96.9%)
+    core: no detector + escalation               4 / 7 (80 / 140 ms, never 5.4%) | 0 / 2 (0 / 40 ms, never 31.4%) | 6 / 8 (120 / 160 ms, never 46.7%)
+    core: rule + escalation, with the lost-branch gate 1 / 4 (20 / 80 ms, never 0.0%) | 0 / 7 (0 / 140 ms, never 29.2%) | 8 / 9 (160 / 180 ms, never 44.5%)
+Core action set (recoverable by the 36): Goodput after onset in bit/s (nominal payload rate 50.00 kb/s: payload bits per frame per decision cycle; a frame delivers goodput factor x (1 - packet loss), none before a coded link's first packet), mean [95%] beside the normalized goodput:
+  no response                                  threat episodes (32256) 6.09 kb/s [5.58 kb/s, 6.63 kb/s], normalized 0.174 | recoverable jamming (11294) 4.03 kb/s [3.65 kb/s, 4.42 kb/s], normalized 0.118
+  core: no detector + escalation               threat episodes (32256) 9.04 kb/s [8.51 kb/s, 9.58 kb/s], normalized 0.260 | recoverable jamming (11294) 8.20 kb/s [7.75 kb/s, 8.66 kb/s], normalized 0.240
+  core: rule + escalation, with the lost-branch gate threat episodes (32256) 8.48 kb/s [8.06 kb/s, 8.94 kb/s], normalized 0.241 | recoverable jamming (11294) 7.45 kb/s [7.10 kb/s, 7.79 kb/s], normalized 0.214
+Rule rows done in 67.9 min.
