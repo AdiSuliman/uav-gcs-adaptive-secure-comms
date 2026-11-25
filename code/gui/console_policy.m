@@ -41,6 +41,9 @@ function varargout = console_policy(cmd, varargin)
 %   s = console_policy('kpi_note', A, has_note)
 %       the footnote of the KPI tab: has_note true when the bundle holds results/adoption_note.txt;
 %       '' when A is off.
+%   t = console_policy('kpi1_head', v)
+%       KPI 1's headline from its kpi_summary value v: {macro-F1 %, lowest class %, threshold};
+%       {} when v does not carry it.
 %   H = console_policy('lat_head', Lt)
 %       KPI 7's cycle latency from LAT (measure_latency.m): the deployed chain (H.med, H.p95 in ms,
 %       H.chain); a latency without the deployed chain falls back to the DQN chain, as
@@ -57,6 +60,7 @@ switch cmd
     case 'adopt_line', varargout{1} = adopt_line(varargin{:});
     case 'kpi_note',  varargout{1} = kpi_note(varargin{:});
     case 'lat_head',  varargout{1} = lat_head(varargin{:});
+    case 'kpi1_head', varargout{1} = kpi1_head(varargin{:});
     otherwise, error('console_policy:cmd', 'console_policy: unknown command %s', cmd);
 end
 end
@@ -193,4 +197,8 @@ if isfield(Lt, 'total_dep_median_ms')
 else
     H = struct('med', Lt.total_dqn_median_ms, 'p95', Lt.total_dqn_p95_ms, 'chain', 'DQN chain');
 end
+end
+
+function t = kpi1_head(v)
+t = regexp(v, 'macro-F1 ([\d.]+)%, lowest class ([\d.]+)%, from (\S+ dB)', 'tokens', 'once');
 end

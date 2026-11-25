@@ -227,6 +227,21 @@ for r = roots
 end
 end
 
+function test_kpi1_head(tc)
+verifyEqual(tc, console_policy('kpi1_head', 'macro-F1 94.93%, lowest class 84.46%, from 0 dB'), {'94.93', '84.46', '0 dB'});
+verifyEmpty(tc, console_policy('kpi1_head', 'accuracy 95.0%'));
+W = fileparts(tc.TestData.root);
+roots = {fullfile(W, 'adopt-p1-d126', 'results', 'rule_fix', 'p1', 'adopted', 'on', 'results'), ...
+    fullfile(W, 'adopt-hop-p3', 'results', 'dqn_hop', 'p3', 'adopted', 'on', 'results')};
+roots = roots(cellfun(@(r) isfile(fullfile(r, 'kpi_summary.mat')), roots));
+assumeNotEmpty(tc, roots, 'no adopted root beside this checkout');
+for r = roots
+    K = load(fullfile(r{1}, 'kpi_summary.mat'), 'KPI'); k1 = K.KPI([K.KPI.id] == 1);
+    t = console_policy('kpi1_head', k1.value);
+    verifyNotEmpty(tc, strfind(fileread(fullfile(r{1}, 'kpi_summary.txt')), ['macro-F1 ' t{1} '%']), r{1});
+end
+end
+
 function test_console_wires_the_lines(tc)
 src = strrep(fileread(which('demo_gui')), char(13), '');
 verifyNotEmpty(tc, strfind(src, 'console_policy(''adopt_line'', env.adopt)'));
@@ -234,6 +249,7 @@ verifyNotEmpty(tc, strfind(src, 'console_policy(''kpi_note'', env.adopt, isfile(
 verifyNotEmpty(tc, strfind(src, 'decRows = {''1x'', 68}; if ~isempty(adoptTxt)'));   % off: the two-row layout as it was
 verifyEqual(tc, numel(strfind(src, 'console_policy(''lat_head'', Lt)')), 2);            % the KPI 7 card and the latency plot
 verifyEmpty(tc, strfind(src, 'Lt.total_dqn_median_ms'));
+verifyNotEmpty(tc, strfind(src, 'console_policy(''kpi1_head'', k1.value)'));       % the KPI 1 card from the summary
 end
 
 function test_export_copies_the_adoption_note(tc)

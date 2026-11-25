@@ -2763,7 +2763,14 @@ function loadKpiTab(fig)
         appLog(fig, sprintf('KPI summary: %s', strjoin(arrayfun(@(q) sprintf('%d %s', q.id, q.status), Kp, ...
             'UniformOutput', false), ' | ')));
         % KPI 4 and 5 as measured by measure_all_kpis.m (recovered episodes, per threat)
-        k4 = Kp([Kp.id] == 4); k5 = Kp([Kp.id] == 5);
+        k1 = Kp([Kp.id] == 1); k4 = Kp([Kp.id] == 4); k5 = Kp([Kp.id] == 5);
+        t1 = []; if ~isempty(k1), t1 = console_policy('kpi1_head', k1.value); end
+        if ~isempty(t1)                                  % KPI 1's headline: macro-F1 above the threshold chosen on validation
+            col = c.green; if ~strcmp(k1.status, 'MET'), col = c.amber; end
+            sub = sprintf('macro-F1 from %s | lowest class %s%% | target >= 90%%', t1{3}, t1{2});
+            if ~isempty(metrics), sub = sprintf('%s | all frames: accuracy %.1f%%', sub, metrics.overall_accuracy_pct); end
+            setCard(ui, 1, sprintf('%s%%', t1{1}), sub, col);
+        end
         t4 = regexp(k4.value, 'lowest threat (\S+) ([\d.]+)%, (\d+) of (\d+) threats', 'tokens', 'once');
         if ~isempty(t4)
             col = c.green; if ~strcmp(k4.status, 'MET'), col = c.amber; end
