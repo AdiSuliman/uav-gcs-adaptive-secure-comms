@@ -23,7 +23,7 @@ clean_ref = struct('ebno', 0:3:15, 'ber_est', [4e-2 1.2e-2 3e-3 8e-4 2e-4 5e-5],
 save('data/policy_pools.mat', 'clean_ref');
 clear('clean_ber_ref');
 tc.TestData.base = 'd4623ed';                                    % the commit this branch starts from: profile 1's HEAD
-tc.TestData.tree_rev = 'd4623ed';                                % the tree's code
+tc.TestData.tree_rev = 'ed5b812';                                % the tree's code (D126)
 tc.TestData.layer = 'cc2d4f1';                                   % the rule-fix commit whose decision layer is ported
 end
 
