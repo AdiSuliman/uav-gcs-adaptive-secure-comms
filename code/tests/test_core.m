@@ -65,6 +65,35 @@ end
 verifyError(tc, @() src_of('no_such_function_xyz'), ?MException);
 end
 
+function test_stage_smoke_hands_cfg_to_c2g_c2u(tc)
+% stage_smoke runs the C2g / C2u scripts with SMOKE set and CFG in their workspace: every entity
+% with CFG.smoke_all_entities, the first one without it (stub scripts with the production guard).
+d = fullfile(tc.TestData.tmp, 'stage_smoke_stub'); mkdir(d);
+for f = {{'experiment_combo_generalization', 'combos'}, {'experiment_unknown_threat', 'threats'}}
+    fid = fopen(fullfile(d, [f{1}{1} '.m']), 'w');
+    fprintf(fid, '%s = {''a'', ''b'', ''c''};\n', f{1}{2});
+    fprintf(fid, 'if exist(''SMOKE'', ''var'') && SMOKE\n');
+    fprintf(fid, '    if ~(exist(''CFG'', ''var'') && isstruct(CFG) && isfield(CFG, ''smoke_all_entities'') && isequal(CFG.smoke_all_entities, true))\n');
+    fprintf(fid, '        %s = %s(1);\n    end\nend\n', f{1}{2}, f{1}{2});
+    fclose(fid);
+end
+addpath(d, '-begin'); clear experiment_combo_generalization experiment_unknown_threat
+cl = onCleanup(@() cleanup_stub(d)); %#ok<NASGU>
+o = stage_smoke();
+verifyEqual(tc, [o.C2g.entities, o.C2u.entities], [3 3]);
+o = stage_smoke({'C2u'});
+verifyEqual(tc, fieldnames(o), {'C2u'});
+o = stage_smoke({'C2g', 'C2u'}, struct());
+verifyEqual(tc, [o.C2g.entities, o.C2u.entities], [1 1]);
+o = stage_smoke({'C2g'}, struct('smoke_all_entities', false));
+verifyEqual(tc, o.C2g.entities, 1);
+verifyError(tc, @() stage_smoke({'C2e'}), ?MException);
+end
+
+function cleanup_stub(d)
+rmpath(d); clear experiment_combo_generalization experiment_unknown_threat
+end
+
 function test_parallel_turn_owner(tc)
 % The parallel turn is held only by a running MATLAB session under the recorded id that
 % started before the turn file was written: this session's fresh turn is held; a file
