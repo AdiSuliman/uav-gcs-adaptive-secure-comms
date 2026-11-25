@@ -1,6 +1,6 @@
 # Roadmap
 
-Plan, status and remaining work of the UAV-GCS jamming detection and mitigation project, as of 23.11.2026 (about 07:00). The scope is the lecturer's revised proposal of 20.10.2026 (D92); everything beyond it is an extension without commitment. Schedule: every date below that is not a measured one comes from `worktrees\session_notes_0ff3\core\finish_plan.md`, the single schedule source (official finish about 29.11, book about 4-5.12, presentation about 7.12). KPI names: the lecturer's L1-L8 and the project's own P-1..P-10.
+Plan, status and remaining work of the UAV-GCS jamming detection and mitigation project, as of 25.11.2026 (about 08:00). The scope is the lecturer's revised proposal of 20.10.2026 (D92); everything beyond it is an extension without commitment. Schedule: every date below that is not a measured one comes from `worktrees\session_notes_0ff3\core\finish_plan.md`, the single schedule source (official finish about 29.11, book about 3-4.12, presentation about 7.12). KPI names: the lecturer's L1-L8 and the project's own P-1..P-10.
 
 Related files: [README](../README.md) | [PROJECT_LOG.md](PROJECT_LOG.md) (execution history) | [DECISIONS.md](DECISIONS.md) (design record) | [LITERATURE.md](LITERATURE.md)
 
@@ -52,7 +52,7 @@ Rows and months are exactly those of the proposal (months 1-8). The interim repo
 | Independent review (Fable 5.2, 21.11 23:55) | Changes are in the "Changes from the Fable review" section of `worktrees\session_notes_0ff3\core\finish_plan.md`: official 16-risk proposal copy, verdict mapping D105/D106, the lecturer table first from saved outputs, a reader of the rule rows on profile 3's fresh pools registered before it is read, freeze and tags before cleanup, L/P names everywhere |
 | B1, code merge (22.11 18:40) | Branch `final-line` `ba3f567`, local: steps 1-5, 7-14 and 16 merged; `lbs-p1` and `lect-p1` kept as as-run tags and reproduced from them; every step's suites 0 failed apart from as-run pins filtered with their reasons (PROJECT_LOG 22.11 18:40) |
 | A5, P-2 and P-4 re-audit (22.11 19:10) | Branch `a5-screen` `2f9fd77`, validation only, no test set read; no candidate reaches the target within P-6, so none is registered for a test read; P-2 0.769 / 0.763 and P-4 antenna_fault 78.9% / 86.8% stand as registered, NOT MET; P1-v2 items V1-V7 (D119 dated line) |
-| Official finish of code and results | about 29.11.2026 (`worktrees\session_notes_0ff3\core\finish_plan.md`); then the project book after Adi's approval |
+| Official finish of code and results | about 28.11.2026 (`worktrees\session_notes_0ff3\core\finish_plan.md`); then the project book after Adi's approval |
 | P1-v2 (D119) | after the project book (Adi, 11.11.2026); about 12 days after it per `worktrees\session_notes_0ff3\core\finish_plan.md` |
 | Windows Update | paused until 30.11.2026 (registry `PauseUpdatesExpiryTime`); a forced reboot is covered by the resume mode |
 
@@ -86,7 +86,7 @@ Profile 1 = three UAV antennas, branch `v7-dev`. The dates come from C2's measur
 | Drop-threshold choice (C1d) | 3.9 min; threshold 4.5 dB |
 | DQN training (C2) | 26.10 16:03 to 28.10 07:22; 81 runs and 2 sensitivity retrains. Deployed: the DQN without escalation (`class_drop` 5/5, 171 dB², penalty 120, costs x0.5, gamma 0.5, seed 44); validation held recovery 82.6%, recovered 95.1% (best rule setting 60.3% and 71.3%); 94 false changes in 54,000 clean cycles, bound met on validation. Reward sensitivity: held 80.1% (costs x0.5) and 80.6% (x2.0), at least the rule's and the table's at every scale |
 
-**Now (23.11.2026):** profile 1's chain is done (29.10 03:19:55, rc=0), CORE_BW is read (rule fix read once 21.11), P1R ended after C1d, profile 3's chain is done (18.11 18:09) and both profiles' final phase, D124 adoptions and D126 rerun are done. B1 and A5 are done (22.11). The D125 fresh-pool build runs in the profile 3 slot (`data\c1p_fresh_cells` held 90 cell files of 93 at 23.11 about 07:00: 11 kept from 19.11 and 79 written since the 21.11 23:33 resume). Next, in order (`worktrees\session_notes_0ff3\core\finish_plan.md`): the D125 read and gate, A6 (final lecturer table and chain rerun), B2, the GUI live check on the final code line, tags and the numbers freeze, the official finish, the project book, P1-v2.
+**Now (25.11.2026):** B1-R reproduced every registered number on both profiles (24.11). A6 on 25.11: the P1 adoption chain with the D126 latency (KPI 7 MET 8.52 / 12.25 ms), the adopted G5 readings on both profiles and the CORE_BW G4 reading passed their gates, and the lecturer table is rebuilt (440 rows, two-way check PASS). Running: B3 final console captures. Next: table review, B4 frozen numbers and releases (25-26.11), B5 tags and backup (26.11), B2 cleanup (26-27.11), B6 and B7 (about 27.11), official finish about 28.11; book about 3-4.12, presentation about 7.12.
 
 **Chain stages** (all done 29.10; durations are estimates from smoke runs and the earlier full runs; no full-scale v7 run exists yet for these stages):
 
@@ -117,7 +117,7 @@ Order: controlled-bandwidth study (done), profile-1 rerun (ended after C1d), pro
 | Profile 3 maps | SURV map v2 (D100); SURV3 v2 (D101) | 1243.5 min; 534.3 min | Done 14.11 |
 | Profile 3 decision layer | C1c, C1d, C2, C2e, C2g, C2u, GAL, EDGE, KPI, DASH, WEAK, RPT, then LAT (the takeover's final phase) | profile 1's durations as a guide | Done 18.11 18:09 (LAT 20.11) |
 | Cleanup window | Behaviour-preserving cleanup of the code tree; the plan and the audit are in `docs/review/code_audit_20261105/`; every batch tested before and after | after the as-run tags and the numbers freeze (`worktrees\session_notes_0ff3\core\finish_plan.md`) | Planned; runs on a branch and gates neither the official finish nor the book |
-| Folder consolidation | One main project folder with topic subfolders | after the cleanup | Before the official finish (about 29.11) |
+| Folder consolidation | One main project folder with topic subfolders | after the cleanup | Before the official finish (about 28.11) |
 | Project book and presentation | Book with the lecturer's KPI table first, extensions in their own section | book about 4-5.12, presentation about 7.12 (`worktrees\session_notes_0ff3\core\finish_plan.md`) | Chapters on the final parts from 22.11; delivered after the official finish and Adi's approval |
 | P1-v2 (D119) | Profile-1 rerun with the fixes proven in profile 3, on new never-read sets, on the cleaned code; protocol registered on the cleaned code; D120 predictive readings; two unknown-threat candidates (layer-fused Mahalanobis or k-NN on earlier CNN layers; link-budget residual with per-antenna imbalance), chosen on validation | after the book | Moved after the book (Adi, 11.11.2026) |
 
