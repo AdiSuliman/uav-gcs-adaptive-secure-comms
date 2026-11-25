@@ -36,6 +36,11 @@ function varargout = console_policy(cmd, varargin)
 %       A off: opt unchanged.
 %   ctx = console_policy('adopt_ctx', D, A, which, ctx)
 %       ctx.opt (episode_cycle.m) of the policy which ('dqn', 'rule', 'core'); A off: ctx unchanged.
+%   s = console_policy('adopt_line', A)
+%       one display line naming the adopted settings and the rows they apply to; '' when A is off.
+%   s = console_policy('kpi_note', A, has_note)
+%       the footnote of the KPI tab: has_note true when the bundle holds results/adoption_note.txt;
+%       '' when A is off.
 switch cmd
     case 'load',     varargout{1} = load_deployed(varargin{:});
     case 'deployed', varargout{1} = deployed_of(varargin{:});
@@ -45,6 +50,8 @@ switch cmd
     case 'adopt',    varargout{1} = adopt_of(varargin{:});
     case 'opt',      varargout{1} = adopt_opt(varargin{:});
     case 'adopt_ctx', varargout{1} = adopt_ctx(varargin{:});
+    case 'adopt_line', varargout{1} = adopt_line(varargin{:});
+    case 'kpi_note',  varargout{1} = kpi_note(varargin{:});
     otherwise, error('console_policy:cmd', 'console_policy: unknown command %s', cmd);
 end
 end
@@ -154,4 +161,23 @@ switch which
     otherwise, error('console_policy:which', 'console_policy: unknown policy %s', which);
 end
 ctx.opt = o;
+end
+
+function s = adopt_line(A)
+s = '';
+if ~(isstruct(A) && isfield(A, 'on') && A.on), return; end
+p = {};
+if ~isempty(A.rule_fix), p{end+1} = sprintf('rule_fix=%s (rule rows)', A.rule_fix); end
+if ~isempty(A.dqn_hop), p{end+1} = sprintf('dqn_hop=%s (deployed DQN)', A.dqn_hop); end
+s = ['adopted: ' strjoin(p, ' | ')];
+end
+
+function s = kpi_note(A, has_note)
+s = '';
+if ~(isstruct(A) && isfield(A, 'on') && A.on), return; end
+if has_note
+    s = 'KPI numbers: adopted reading (results/adoption_note.txt)';
+else
+    s = 'KPI numbers: registered reading, without the adopted settings the live decisions use';
+end
 end

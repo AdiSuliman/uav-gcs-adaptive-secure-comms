@@ -182,6 +182,50 @@ verifyEqual(tc, adopt_reading('cfg', jsondecode(fileread(f1))).adopt, struct('ru
 verifyEqual(tc, adopt_reading('cfg', jsondecode(fileread(f3))).adopt, struct('rule_fix', 'keep+st+rate', 'dqn_hop', 'rule'));
 end
 
+%% ---------- what the console shows of the adoption ----------
+function test_adopt_line(tc)
+A3 = console_policy('adopt', write_profile(tc, 'l3.json', struct('rule_fix', 'keep+st+rate', 'dqn_hop', 'rule')));
+verifyEqual(tc, console_policy('adopt_line', A3), 'adopted: rule_fix=keep+st+rate (rule rows) | dqn_hop=rule (deployed DQN)');
+A1 = console_policy('adopt', write_profile(tc, 'l1.json', struct('rule_fix', 'keep+st+rate')));
+verifyEqual(tc, console_policy('adopt_line', A1), 'adopted: rule_fix=keep+st+rate (rule rows)');
+Ah = console_policy('adopt', write_profile(tc, 'lh.json', struct('dqn_hop', 'rule')));
+verifyEqual(tc, console_policy('adopt_line', Ah), 'adopted: dqn_hop=rule (deployed DQN)');
+for A = {console_policy('adopt', 'no_such_profile.json'), console_policy('adopt', write_profile(tc, 'l0.json', []))}
+    verifyEqual(tc, console_policy('adopt_line', A{1}), '');     % off: no line, no empty row
+    verifyEqual(tc, console_policy('kpi_note', A{1}, true), '');
+    verifyEqual(tc, console_policy('kpi_note', A{1}, false), '');
+end
+end
+
+function test_kpi_note(tc)
+A = console_policy('adopt', write_profile(tc, 'k3.json', struct('rule_fix', 'keep+st+rate', 'dqn_hop', 'rule')));
+verifyEqual(tc, console_policy('kpi_note', A, true), 'KPI numbers: adopted reading (results/adoption_note.txt)');
+verifyEqual(tc, console_policy('kpi_note', A, false), ...
+    'KPI numbers: registered reading, without the adopted settings the live decisions use');
+end
+
+function test_console_wires_the_lines(tc)
+src = strrep(fileread(which('demo_gui')), char(13), '');
+verifyNotEmpty(tc, strfind(src, 'console_policy(''adopt_line'', env.adopt)'));
+verifyNotEmpty(tc, strfind(src, 'console_policy(''kpi_note'', env.adopt, isfile(''results/adoption_note.txt''))'));
+verifyNotEmpty(tc, strfind(src, 'decRows = {''1x'', 68}; if ~isempty(adoptTxt)'));   % off: the two-row layout as it was
+end
+
+function test_export_copies_the_adoption_note(tc)
+[root, tgt] = bundle_root(tc, 'adopt_note');
+cr = clean_ref_table();
+save(fullfile(root, 'data', 'policy_pools.mat'), '-struct', 'cr');
+note = ['Adopted: rule_fix keep+st+rate, then dqn_hop rule.' newline 'second line' newline];
+fid = fopen(fullfile(root, 'results', 'adoption_note.txt'), 'w'); fprintf(fid, '%s', note); fclose(fid);
+export_quiet(tgt, root);
+f = fullfile(tgt, 'rx3', 'results', 'adoption_note.txt');
+verifyTrue(tc, isfile(f));
+verifyEqual(tc, fileread(f), note);
+delete(fullfile(root, 'results', 'adoption_note.txt'));
+export_quiet(tgt, root);                                        % a root without it: no older copy stays
+verifyFalse(tc, isfile(f));
+end
+
 %% ---------- helpers ----------
 function f = write_profile(tc, name, ad)
 f = fullfile(tc.TestData.tmp, name);
